@@ -324,6 +324,98 @@ static void draw_toast(SDL_Renderer *r)
     TTF_DestroyText(text);
 }
 
+/* F1: every shortcut, in a panel over the whole window. */
+static const char *const HELP[][2] = {
+    {"F1", "Show / hide this help"},
+    {NULL, "Layout"},
+    {"Ctrl+Shift+S", "Editor beside the preview on / off"},
+    {"Ctrl+Shift+E", "Editor only on / off"},
+    {"Ctrl+Shift+O", "Side by side / stacked"},
+    {"Ctrl+Shift+X", "Swap which side the editor is on"},
+    {"Ctrl+Shift+Tab", "Move focus between editor and preview"},
+    {NULL, "Files"},
+    {"Ctrl+Shift+N", "Open a file (or drop one on the window)"},
+    {"Ctrl+O", "Open a file (preview focused)"},
+    {"Ctrl+Q", "Quit (preview focused)"},
+    {"md.exe -e file.md", "Start with the editor open"},
+    {NULL, "Preview"},
+    {"Wheel, PgUp / PgDn", "Scroll (the editor follows)"},
+    {"Space, Home / End", "Scroll a page, to the start / end"},
+    {"Drag, Shift+click", "Select text"},
+    {"Ctrl+A", "Select all"},
+    {"Ctrl+C", "Copy the selection"},
+    {"Click a link", "Open it (.md files open in md)"},
+};
+
+static void draw_help(SDL_Renderer *r)
+{
+    if (!app.show_help || !app.fonts_ok) return;
+    int w = 0, h = 0;
+    SDL_GetRenderOutputSize(r, &w, &h);
+    const float s = display_scale();
+    const Theme *th = &app.view.theme;
+    TTF_Font *title_font = fonts_get(FONT_MEDIUM, 22.0f * s);
+    TTF_Font *head_font = fonts_get(FONT_MEDIUM, 13.0f * s);
+    TTF_Font *key_font = fonts_get(FONT_MONO, 14.0f * s);
+    TTF_Font *text_font = fonts_get(FONT_REGULAR, 15.0f * s);
+    if (!title_font || !head_font || !key_font || !text_font) return;
+
+    SDL_SetRenderDrawBlendMode(r, SDL_BLENDMODE_BLEND);
+    SDL_SetRenderDrawColor(r, 0, 0, 0, 0x8C);
+    SDL_FRect all = {0, 0, (float)w, (float)h};
+    SDL_RenderFillRect(r, &all);
+
+    const int n = (int)SDL_arraysize(HELP);
+    const float row = 26.0f * s, head = 34.0f * s, pad = 28.0f * s;
+    const float key_w = 190.0f * s;
+    float body_h = 0;
+    for (int i = 0; i < n; ++i) body_h += HELP[i][0] ? row : head;
+    const float pw = SDL_min(620.0f * s, (float)w - 32.0f * s);
+    const float ph = SDL_min(pad * 2 + 40.0f * s + body_h, (float)h - 32.0f * s);
+    SDL_FRect panel = {SDL_floorf(((float)w - pw) * 0.5f), SDL_floorf(((float)h - ph) * 0.5f), pw, ph};
+    SDL_SetRenderDrawColor(r, th->bg.r, th->bg.g, th->bg.b, 0xFF);
+    SDL_RenderFillRect(r, &panel);
+    SDL_SetRenderDrawColor(r, th->rule.r, th->rule.g, th->rule.b, 0xFF);
+    SDL_RenderRect(r, &panel);
+
+    SDL_Rect clip = {(int)panel.x, (int)panel.y, (int)panel.w, (int)panel.h};
+    SDL_SetRenderClipRect(r, &clip);
+    float x = panel.x + pad, y = panel.y + pad;
+    TTF_Text *t = TTF_CreateText(app.engine, title_font, "Keyboard shortcuts", 0);
+    if (t) {
+        TTF_SetTextColor(t, th->heading.r, th->heading.g, th->heading.b, 0xFF);
+        TTF_DrawRendererText(t, x, y);
+        TTF_DestroyText(t);
+    }
+    y += 40.0f * s;
+    for (int i = 0; i < n; ++i) {
+        if (!HELP[i][0]) { /* section heading */
+            t = TTF_CreateText(app.engine, head_font, HELP[i][1], 0);
+            if (t) {
+                TTF_SetTextColor(t, th->muted.r, th->muted.g, th->muted.b, 0xFF);
+                TTF_DrawRendererText(t, x, y + head - row);
+                TTF_DestroyText(t);
+            }
+            y += head;
+            continue;
+        }
+        t = TTF_CreateText(app.engine, key_font, HELP[i][0], 0);
+        if (t) {
+            TTF_SetTextColor(t, th->accent.r, th->accent.g, th->accent.b, 0xFF);
+            TTF_DrawRendererText(t, x, y + 2.0f * s);
+            TTF_DestroyText(t);
+        }
+        t = TTF_CreateText(app.engine, text_font, HELP[i][1], 0);
+        if (t) {
+            TTF_SetTextColor(t, th->text.r, th->text.g, th->text.b, 0xFF);
+            TTF_DrawRendererText(t, x + key_w, y);
+            TTF_DestroyText(t);
+        }
+        y += row;
+    }
+    SDL_SetRenderClipRect(r, NULL);
+}
+
 static void render(void)
 {
     SDL_Renderer *r = app.renderer;
@@ -360,6 +452,7 @@ static void render(void)
         }
         SDL_SetRenderViewport(r, NULL);
     }
+    draw_help(r);
     draw_toast(r);
     SDL_RenderPresent(r);
     app.dirty = false;
@@ -722,6 +815,22 @@ static bool handle_event(const SDL_Event *e)
         request_quit();
         break;
     case SDL_EVENT_KEY_DOWN:
+        if (e->key.key == SDLK_F1 && !(e->key.mod & (SDL_KMOD_CTRL | SDL_KMOD_ALT))) {
+            app.show_help = !app.show_help;
+            app.dirty = true;
+            break;
+        }
+        if (app.show_help) {
+            /* Any other key just closes the help. */
+            bool modifier = e->key.key == SDLK_LSHIFT || e->key.key == SDLK_RSHIFT ||
+                            e->key.key == SDLK_LCTRL || e->key.key == SDLK_RCTRL ||
+                            e->key.key == SDLK_LALT || e->key.key == SDLK_RALT;
+            if (!modifier) {
+                app.show_help = false;
+                app.dirty = true;
+            }
+            break;
+        }
         if (app_shortcut(&e->key)) break;
         if ((e->key.mod & SDL_KMOD_CTRL) && !(e->key.mod & SDL_KMOD_RALT) &&
             (e->key.key == SDLK_Q) && app.focus == PANE_VIEWER) {
@@ -732,6 +841,7 @@ static bool handle_event(const SDL_Event *e)
         else viewer_key(&e->key);
         break;
     case SDL_EVENT_TEXT_INPUT:
+        if (app.show_help) break;
         if (app.focus == PANE_EDITOR && app.nvim_ok) editor_text(e->text.text);
         break;
     case SDL_EVENT_MOUSE_WHEEL: {
@@ -750,6 +860,13 @@ static bool handle_event(const SDL_Event *e)
     }
     case SDL_EVENT_MOUSE_BUTTON_DOWN:
     case SDL_EVENT_MOUSE_BUTTON_UP: {
+        if (app.show_help) {
+            if (e->type == SDL_EVENT_MOUSE_BUTTON_DOWN) {
+                app.show_help = false;
+                app.dirty = true;
+            }
+            break;
+        }
         float x = e->button.x, y = e->button.y;
         to_pixels(&x, &y);
         bool down = e->type == SDL_EVENT_MOUSE_BUTTON_DOWN;

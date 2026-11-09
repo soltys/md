@@ -66,6 +66,7 @@ typedef struct App {
     char toast[96];
     Uint64 toast_until;  /* SDL_GetTicks() deadline */
 
+    bool show_help;      /* F1 overlay */
     bool dark;
     bool dirty;
     bool quitting;

@@ -70,6 +70,7 @@ open it in md to try it out.
 
 | Key | Action |
 | --- | --- |
+| F1 | Show / hide a list of all shortcuts |
 | Ctrl+Shift+O | Switch split orientation (side by side / stacked) |
 | Ctrl+Shift+S | Split on/off (off = preview only, the default) |
 | Ctrl+Shift+X | Swap sides: editor left/right (top/bottom when stacked) |

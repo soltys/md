@@ -8,6 +8,7 @@ follows as you type.
 
 | Shortcut | What it does |
 | :--- | :--- |
+| `F1` | Show / hide a list of all shortcuts |
 | `Ctrl+Shift+O` | Switch the split between side by side and stacked |
 | `Ctrl+Shift+S` | Split on/off (off shows only the preview, the default) |
 | `Ctrl+Shift+X` | Swap which side the editor is on |
