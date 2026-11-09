@@ -276,13 +276,15 @@ static Uint32 SDLCALL toast_expired(void *userdata, SDL_TimerID id, Uint32 inter
     return 0;
 }
 
-static void show_toast(const char *msg)
+static void show_toast_ms(const char *msg, Uint32 ms)
 {
     SDL_strlcpy(app.toast, msg, sizeof app.toast);
-    app.toast_until = SDL_GetTicks() + 1500;
-    SDL_AddTimer(1550, toast_expired, NULL);
+    app.toast_until = SDL_GetTicks() + ms;
+    SDL_AddTimer(ms + 50, toast_expired, NULL);
     app.dirty = true;
 }
+
+static void show_toast(const char *msg) { show_toast_ms(msg, 1500); }
 
 /* A small pill centred at the bottom of the viewer (or the window). */
 static void draw_toast(SDL_Renderer *r)
@@ -467,9 +469,32 @@ static void viewer_key(const SDL_KeyboardEvent *k)
     app.dirty = true;
 }
 
+/* Neovim starts only when the editor is first asked for. Spawning the
+ * process is quick; nvim's own startup runs while md keeps going, and the
+ * pane fills in once it draws. */
+static bool ensure_nvim(void)
+{
+    if (app.nvim_started) return app.nvim_ok;
+    if (!app.fonts_ok) return false;
+    app.nvim_started = true;
+    const char *file = app.view.doc && app.view.doc->path && app.view.doc->path[0]
+                     ? app.view.doc->path : app.start_file;
+    nvim_start_async(&app.nvim, file, app.wake_event);
+    app.nvim_ok = nvim_wait_started(&app.nvim);
+    if (app.nvim_ok) {
+        editor_init(&app.editor, app.engine, &app.nvim);
+    } else {
+        char msg[96];
+        SDL_snprintf(msg, sizeof msg, "Could not start Neovim%s%s",
+                     app.nvim.error ? ": " : "", app.nvim.error ? app.nvim.error : "");
+        show_toast_ms(msg, 4000);
+    }
+    return app.nvim_ok;
+}
+
 static void set_layout(Layout layout)
 {
-    if (!app.nvim_ok) return;
+    if (!ensure_nvim()) return;
     app.layout = app.layout == layout ? LAYOUT_SPLIT : layout;
     if (app.layout == LAYOUT_SPLIT) app.focus = PANE_EDITOR;
     relayout();
@@ -799,7 +824,7 @@ int main(int argc, char **argv)
     /* 1. Kick off background work before touching the window system. */
     app.font_thread = SDL_CreateThread(font_thread_main, "md-fonts", NULL);
     if (file) start_load(file);
-    nvim_start_async(&app.nvim, file, 0);
+    app.start_file = file;
 
     /* 2. Window + renderer. */
     SDL_SetHint(SDL_HINT_RENDER_VSYNC, "1");
@@ -810,8 +835,8 @@ int main(int argc, char **argv)
     app.wake_event = SDL_RegisterEvents(1);
     images_init(app.wake_event);
     app.dark = SDL_GetSystemTheme() == SDL_SYSTEM_THEME_DARK;
-    /* Open as a viewer; Ctrl+Shift+S brings in the editor. Neovim still
-     * starts in the background so that is instant. */
+    /* Open as a viewer; Ctrl+Shift+S (or Ctrl+Shift+E) starts Neovim and
+     * brings in the editor. */
     app.layout = LAYOUT_VIEWER;
     app.vertical = true;
     app.focus = PANE_VIEWER;
@@ -828,7 +853,6 @@ int main(int argc, char **argv)
      *    Presenting before showing avoids a white/black flash. */
     const Theme *theme = app.dark ? &THEME_DARK : &THEME_LIGHT;
     app.view.theme = *theme;
-    app.nvim_ok = true; /* assume nvim works until we know it failed */
     relayout();
     render();
     SDL_ShowWindow(app.window);
@@ -846,17 +870,11 @@ int main(int argc, char **argv)
     }
     view_init(&app.view, app.engine, theme);
 
-    /* 5. Neovim: process creation overlapped with everything above. */
-    app.nvim.wake_event = app.wake_event;
-    app.nvim_ok = app.fonts_ok && nvim_wait_started(&app.nvim);
-    if (app.nvim_ok) editor_init(&app.editor, app.engine, &app.nvim);
-    else app.layout = LAYOUT_VIEWER;
-
-    relayout(); /* also attaches the UI */
+    relayout();
     take_loaded_document(); /* in case the loader already finished */
     render();
 
-    /* 6. Event loop: sleep until something happens. */
+    /* 5. Event loop: sleep until something happens. */
     bool running = true;
     while (running) {
         SDL_Event e;

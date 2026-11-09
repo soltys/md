@@ -12,7 +12,7 @@
  * The config is nvim/init.lua from the repo, embedded in md.exe and written
  * to <SDL pref path>/init.lua (only when its content changed). With --embed
  * Neovim waits for a UI to attach before sourcing the config, so the process
- * is started on a background thread before the window exists. */
+ * is started on demand, the first time the editor is shown. */
 
 typedef struct NvCell {
     char text[28];      /* UTF-8 grapheme; "" = right half of a wide char */

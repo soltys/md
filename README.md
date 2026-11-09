@@ -56,11 +56,11 @@ md.exe file.md
 ```
 
 md opens as a **viewer**: just the rendered Markdown. Press Ctrl+Shift+S to
-bring in Neovim beside it (Neovim starts in the background at launch, so this is
-instant). The preview follows the buffer as you type and scrolls along with the
+start Neovim and bring it in beside the preview. Neovim is only launched when
+you first ask for the editor, so a plain view never runs it. The preview follows the buffer as you type and scrolls along with the
 editor. Select text in the preview with the mouse (or Ctrl+A) and press Ctrl+C
 to copy it.
-Without `nvim` on `PATH`, md runs as a viewer only.
+Without `nvim` on `PATH`, md stays a viewer and says why when you ask for the editor.
 
 See [docs/features.md](docs/features.md) for a tour of everything md renders;
 open it in md to try it out.
