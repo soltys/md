@@ -124,7 +124,12 @@ if(WIN32)
     if(DEFINED ENV{LOCALAPPDATA})
         file(TO_CMAKE_PATH "$ENV{LOCALAPPDATA}/Programs/md" _md_old_default)
     endif()
-    if(CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT OR CMAKE_INSTALL_PREFIX STREQUAL _md_old_default)
+    # Replace CMake's stock default (C:/Program Files/md, which needs admin)
+    # also in build trees configured before this rule existed, where
+    # CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT is no longer set.
+    if(CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT OR
+       CMAKE_INSTALL_PREFIX STREQUAL _md_old_default OR
+       CMAKE_INSTALL_PREFIX MATCHES "/Program Files( \\(x86\\))?/md$")
         execute_process(
             COMMAND powershell -NoProfile -NonInteractive -Command
                     "[Environment]::GetFolderPath('MyDocuments')"
@@ -137,6 +142,7 @@ if(WIN32)
             set(CMAKE_INSTALL_PREFIX "${_md_prefix}" CACHE PATH "Install location" FORCE)
         endif()
     endif()
+    message(STATUS "md.exe installs to ${CMAKE_INSTALL_PREFIX}")
     install(TARGETS md RUNTIME DESTINATION .)
 else()
     install(TARGETS md RUNTIME DESTINATION bin)
