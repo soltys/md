@@ -55,13 +55,43 @@ build\ninja-release\md.exe README.md
 md.exe file.md
 ```
 
-You can also drop a file on the window or press **Ctrl+O**.
+md opens with **Neovim on the left and the rendered preview on the right**.
+The preview follows the buffer as you type and scrolls along with the editor.
+Without `nvim` on `PATH`, md runs as a viewer only.
+
+See [docs/features.md](docs/features.md) for a tour of everything md renders;
+open it in md to try it out.
 
 | Key | Action |
 | --- | --- |
-| Ctrl+O | Open a file |
-| Ctrl+Q / Ctrl+W | Quit |
-| Up / Down, PgUp / PgDn, Space, Home / End, mouse wheel | Scroll |
+| Ctrl+Shift+O | Switch split orientation (side by side / stacked) |
+| Ctrl+Shift+S | Split on/off (off = preview only) |
+| Ctrl+Shift+E | Editor only on/off |
+| Ctrl+Shift+Tab | Move keyboard focus between editor and preview |
+| Ctrl+Shift+N | Open a file (also: drop a file on the window) |
+| Ctrl+O / Ctrl+Q | Open / quit, when the preview has focus |
+| PgUp / PgDn / Space / Home / End, wheel | Scroll the preview |
+
+App shortcuts use Ctrl+Shift so they never clash with AltGr letters on Polish
+and other keyboards (AltGr is Ctrl+Alt on Windows) or with Neovim's own keys.
+Everything else goes to Neovim. Closing the window sends `:qa` to Neovim, so
+unsaved changes are never dropped silently.
+
+### Rendering
+
+* Headings, paragraphs, hard/soft line breaks, block quotes (nested), lists
+  (nested, ordered, task lists), horizontal rules
+* Bold, italic, strikethrough, inline code, escapes, HTML entities
+* Links (inline, reference, autolinks, e-mail); click to open, `.md` links
+  open in md
+* Tables with column alignment and inline formatting in cells
+* Images (PNG, JPG, GIF, BMP, SVG, QOI, ...) loaded in the background,
+  relative to the document; remote images show their alt text
+* Emoji including ZWJ sequences, skin tones, flags and keycaps
+  (Noto Color Emoji)
+* Fenced code with syntax highlighting (tree-sitter) for C, C++, C#, Python,
+  JavaScript, JSON, Bash, Rust and Lua
+* Light/dark theme following Windows
 
 ## Neovim config
 
@@ -85,19 +115,34 @@ nvim -u nvim\init.lua README.md
 
 ## How startup is kept fast
 
-1. Before `SDL_Init`, a font thread starts initialising FreeType/HarfBuzz and
-   opening the embedded fonts, and a loader thread reads and parses the file.
+1. Before `SDL_Init`, three threads start: one initialises FreeType/HarfBuzz
+   and opens the embedded fonts, one reads and parses the file, one writes the
+   Neovim config and spawns `nvim --embed`.
 2. The main thread creates the window and renderer, presents one frame in the
    background colour and only then shows the window, so there is no flash.
 3. The main thread waits for the fonts only when it is about to draw text.
 4. Fonts are never copied: FreeType reads them straight from the executable's
    resource section, and only the pages it touches get loaded.
-5. The window is DPI-aware through the manifest, so it opens at the right size.
+5. Only the visible part of the document is laid out before the first frame;
+   the rest is laid out in small slices while the app is idle. Text objects
+   are created the first time a line is drawn.
+6. Images and syntax highlighting queries load lazily on worker threads.
+7. The window is DPI-aware through the manifest, so it opens at the right size.
 
-## Roadmap
+## Source layout
 
-1. ✅ Skeleton, build, embedded fonts, fast first frame
-2. Full Markdown viewer: inline formatting, links, images, tables, emoji sequences
-3. Embedded Neovim editor (`nvim --embed --clean`) with horizontal/vertical
-   split (Ctrl+Alt+O) and split on/off (Ctrl+Alt+S)
-4. Syntax highlighting in code blocks, scroll sync, startup polish
+| File | Purpose |
+| --- | --- |
+| `src/main.c` | Startup, event loop, split layout, input routing |
+| `src/document.c` | tree-sitter block + inline parsing into blocks and styled spans |
+| `src/view.c` | Rich-text layout engine and preview drawing |
+| `src/highlight.c`, `src/regex.c` | Code block highlighting with tree-sitter queries |
+| `src/nvim.c`, `src/msgpack.c` | Neovim process and msgpack-RPC UI client |
+| `src/editor.c` | Draws Neovim's grid |
+| `src/fonts.c`, `src/assets.c` | Embedded fonts (RCDATA) and font cache |
+| `src/emoji.c`, `src/images.c` | Emoji clustering, async image loading |
+
+## Status
+
+All four planned steps are in: skeleton and fast start, full viewer, embedded
+Neovim with split view, and code highlighting / scroll sync / startup polish.

@@ -5,6 +5,7 @@
  *   main thread     SDL_Init -> window + renderer -> first (empty) frame -> show
  *   font thread     TTF_Init, FreeType/HarfBuzz, open Roboto + Noto Color Emoji
  *   loader thread   read file, tree-sitter parse, build block list
+ *   nvim thread     write config, spawn `nvim --embed -u <config> file`
  * The main thread only blocks on the font thread right before it needs to
  * draw text, by which time the window is already on screen.
  */
@@ -14,13 +15,14 @@
 
 #include "app.h"
 #include "document.h"
+#include "editor.h"
 #include "fonts.h"
+#include "images.h"
 #include "nvim.h"
 #include "theme.h"
 #include "view.h"
 
 static App app;
-static Nvim nvim;
 
 /* ----------------------------------------------------------- workers -- */
 
@@ -40,35 +42,93 @@ static void wake_main_thread(void)
     }
 }
 
+static void publish_document(Document *doc)
+{
+    /* If an older result was never picked up, discard it. */
+    Document *stale = SDL_SetAtomicPointer(&app.loaded_doc, doc);
+    document_free(stale);
+    SDL_AddAtomicInt(&app.loads_pending, -1);
+    wake_main_thread();
+}
+
 static int SDLCALL loader_thread_main(void *arg)
 {
     char *path = arg;
     Document *doc = document_load(path);
     SDL_free(path);
-    /* Publish; if an older load was never picked up, discard it. */
-    Document *stale = SDL_SetAtomicPointer(&app.loaded_doc, doc);
-    document_free(stale);
-    SDL_AddAtomicInt(&app.loads_pending, -1);
-    wake_main_thread();
+    publish_document(doc);
     return 0;
+}
+
+typedef struct ParseJob {
+    char *name;
+    char *text;
+    size_t len;
+} ParseJob;
+
+static int SDLCALL parse_thread_main(void *arg)
+{
+    ParseJob *job = arg;
+    Document *doc = document_parse(job->name, job->text, job->len);
+    SDL_free(job->name);
+    SDL_free(job);
+    publish_document(doc);
+    return 0;
+}
+
+static void spawn_detached(SDL_ThreadFunction fn, const char *name, void *arg)
+{
+    SDL_AddAtomicInt(&app.loads_pending, 1);
+    SDL_Thread *t = SDL_CreateThread(fn, name, arg);
+    if (t) SDL_DetachThread(t);
+    else fn(arg); /* fall back to doing it inline */
 }
 
 static void start_load(const char *path)
 {
-    SDL_AddAtomicInt(&app.loads_pending, 1);
-    SDL_Thread *t = SDL_CreateThread(loader_thread_main, "md-loader", SDL_strdup(path));
-    if (t) {
-        SDL_DetachThread(t);
-    } else {
-        SDL_AddAtomicInt(&app.loads_pending, -1);
+    spawn_detached(loader_thread_main, "md-loader", SDL_strdup(path));
+}
+
+/* Starts parsing editor text, or queues it if a parse is running. */
+static void start_preview_parse(char *name, char *text, size_t len)
+{
+    if (app.preview_parsing) {
+        SDL_free(app.preview_pending_name);
+        SDL_free(app.preview_pending_text);
+        app.preview_pending_name = name;
+        app.preview_pending_text = text;
+        app.preview_pending_len = len;
+        return;
     }
+    ParseJob *job = SDL_malloc(sizeof(ParseJob));
+    job->name = name;
+    job->text = text;
+    job->len = len;
+    app.preview_parsing = true;
+    spawn_detached(parse_thread_main, "md-parse", job);
+}
+
+/* Opening a file: through Neovim when it runs (the preview follows the
+ * buffer), otherwise straight into the viewer. */
+static void open_file(const char *path)
+{
+    if (app.nvim_ok && app.nvim.attached) nvim_edit_file(&app.nvim, path);
+    else start_load(path);
 }
 
 static void SDLCALL open_dialog_done(void *userdata, const char *const *files, int filter)
 {
     (void)userdata;
     (void)filter;
-    if (files && files[0]) start_load(files[0]);
+    if (!files || !files[0]) return;
+    /* Called on another thread on some platforms: hand over via an event. */
+    SDL_Event ev;
+    SDL_zero(ev);
+    char *copy = SDL_strdup(files[0]);
+    ev.user.type = app.wake_event;
+    ev.user.code = 1;
+    ev.user.data1 = copy;
+    if (!SDL_PushEvent(&ev)) SDL_free(copy);
 }
 
 static void show_open_dialog(void)
@@ -80,7 +140,7 @@ static void show_open_dialog(void)
     SDL_ShowOpenFileDialog(open_dialog_done, NULL, app.window, filters, 2, NULL, false);
 }
 
-/* ------------------------------------------------------------- frame -- */
+/* ------------------------------------------------------------ layout -- */
 
 static float display_scale(void)
 {
@@ -88,27 +148,74 @@ static float display_scale(void)
     return s > 0 ? s : 1.0f;
 }
 
+static bool editor_visible(void)
+{
+    return app.nvim_ok && app.layout != LAYOUT_VIEWER;
+}
+
+static bool viewer_visible(void)
+{
+    return !app.nvim_ok || app.layout != LAYOUT_EDITOR;
+}
+
 static void relayout(void)
 {
     int w = 0, h = 0;
     SDL_GetRenderOutputSize(app.renderer, &w, &h);
-    view_layout(&app.view, (float)w, (float)h, display_scale());
+    float scale = display_scale();
+    SDL_FRect full = {0, 0, (float)w, (float)h};
+    SDL_FRect none = {0, 0, 0, 0};
+
+    if (editor_visible() && viewer_visible()) {
+        float gap = SDL_max(1.0f, SDL_floorf(scale));
+        if (app.vertical) {
+            float half = SDL_floorf((float)w * 0.5f);
+            app.editor_rect = (SDL_FRect){0, 0, half, (float)h};
+            app.viewer_rect = (SDL_FRect){half + gap, 0, (float)w - half - gap, (float)h};
+        } else {
+            float half = SDL_floorf((float)h * 0.5f);
+            app.editor_rect = (SDL_FRect){0, 0, (float)w, half};
+            app.viewer_rect = (SDL_FRect){0, half + gap, (float)w, (float)h - half - gap};
+        }
+    } else if (editor_visible()) {
+        app.editor_rect = full;
+        app.viewer_rect = none;
+    } else {
+        app.editor_rect = none;
+        app.viewer_rect = full;
+    }
+    if (!editor_visible()) app.focus = PANE_VIEWER;
+    else if (!viewer_visible()) app.focus = PANE_EDITOR;
+
+    if (app.fonts_ok) {
+        view_layout(&app.view, app.viewer_rect.w, app.viewer_rect.h, scale);
+        if (app.nvim_ok) {
+            editor_set_scale(&app.editor, scale);
+            int cols, rows;
+            editor_grid_size(&app.editor, app.editor_rect.w, app.editor_rect.h, &cols, &rows);
+            if (editor_visible()) {
+                if (!app.nvim.attached) nvim_attach(&app.nvim, cols, rows);
+                else if (cols != app.nvim.cols || rows != app.nvim.rows) nvim_resize(&app.nvim, cols, rows);
+            }
+        }
+    }
+    if (app.focus == PANE_EDITOR) SDL_StartTextInput(app.window);
+    else SDL_StopTextInput(app.window);
     app.dirty = true;
 }
 
 static void update_title(void)
 {
     Document *doc = app.view.doc;
-    if (!doc) {
-        SDL_SetWindowTitle(app.window, APP_NAME);
-        return;
-    }
-    const char *name = doc->path;
-    for (const char *p = doc->path; *p; ++p) {
-        if (*p == '/' || *p == '\\') name = p + 1;
+    const char *name = NULL;
+    if (doc && doc->path && doc->path[0]) {
+        name = doc->path;
+        for (const char *p = doc->path; *p; ++p) {
+            if (*p == '/' || *p == '\\') name = p + 1;
+        }
     }
     char *title = NULL;
-    SDL_asprintf(&title, "%s - " APP_NAME, name);
+    if (name) SDL_asprintf(&title, "%s - " APP_NAME, name);
     SDL_SetWindowTitle(app.window, title ? title : APP_NAME);
     SDL_free(title);
 }
@@ -118,58 +225,323 @@ static void take_loaded_document(void)
     if (!app.fonts_ok) return;
     Document *doc = SDL_SetAtomicPointer(&app.loaded_doc, NULL);
     if (!doc) return;
-    view_set_document(&app.view, doc);
+
+    bool same_file = app.view.doc && doc->path && app.view.doc->path &&
+                     SDL_strcmp(doc->path, app.view.doc->path) == 0;
+    view_set_document(&app.view, doc, same_file);
     update_title();
-    relayout();
+    app.dirty = true;
+
+    /* A preview parse finished: run the one that queued up meanwhile. */
+    app.preview_parsing = false;
+    if (app.preview_pending_text) {
+        char *name = app.preview_pending_name, *text = app.preview_pending_text;
+        app.preview_pending_name = app.preview_pending_text = NULL;
+        start_preview_parse(name, text, app.preview_pending_len);
+    }
+}
+
+static void pump_nvim(void)
+{
+    Nvim *nv = &app.nvim;
+    if (!app.nvim_ok) return;
+    if (nvim_process(nv)) {
+        if (nv->flushed) {
+            nv->flushed = false;
+            app.dirty = true;
+        }
+        if (nv->text_changed) nvim_request_text(nv);
+        if (nv->buf_ready) {
+            nv->buf_ready = false;
+            start_preview_parse(nv->buf_name, nv->buf_text, nv->buf_text_len);
+            nv->buf_name = nv->buf_text = NULL;
+        }
+        if (nv->scrolled) {
+            nv->scrolled = false;
+            if (viewer_visible()) {
+                view_scroll_to_line(&app.view, nv->top_line);
+                app.dirty = true;
+            }
+        }
+    }
 }
 
 static void render(void)
 {
+    SDL_Renderer *r = app.renderer;
     const Theme *th = &app.view.theme;
-    SDL_SetRenderDrawColor(app.renderer, th->bg.r, th->bg.g, th->bg.b, 0xFF);
-    SDL_RenderClear(app.renderer);
+    SDL_SetRenderViewport(r, NULL);
+    SDL_SetRenderDrawColor(r, th->rule.r, th->rule.g, th->rule.b, 0xFF);
+    SDL_RenderClear(r); /* the divider shows through the gap */
 
-    if (app.fonts_ok) {
-        Document *doc = app.view.doc;
-        if (doc && doc->error) {
-            view_draw_message(&app.view, app.renderer, "Could not open the file", doc->error);
-        } else if (doc && doc->block_count > 0) {
-            view_draw(&app.view, app.renderer);
-        } else if (doc) {
-            view_draw_message(&app.view, app.renderer, "Empty document", doc->path);
-        } else if (SDL_GetAtomicInt(&app.loads_pending) == 0) {
-            view_draw_message(&app.view, app.renderer, "Drop a Markdown file here",
-                              "or press Ctrl+O to open one");
-        }
+    if (app.fonts_ok && editor_visible() && app.nvim.cells) {
+        editor_draw(&app.editor, r, &app.editor_rect, app.focus == PANE_EDITOR);
+    } else if (editor_visible()) {
+        SDL_SetRenderDrawColor(r, 0x1E, 0x1E, 0x2E, 0xFF); /* Mocha base until nvim draws */
+        SDL_RenderFillRect(r, &app.editor_rect);
     }
-    SDL_RenderPresent(app.renderer);
+
+    if (viewer_visible()) {
+        SDL_Rect vp = {(int)app.viewer_rect.x, (int)app.viewer_rect.y,
+                       (int)app.viewer_rect.w, (int)app.viewer_rect.h};
+        SDL_SetRenderViewport(r, &vp);
+        SDL_SetRenderDrawColor(r, th->bg.r, th->bg.g, th->bg.b, 0xFF);
+        SDL_FRect bg = {0, 0, app.viewer_rect.w, app.viewer_rect.h};
+        SDL_RenderFillRect(r, &bg);
+        if (app.fonts_ok) {
+            Document *doc = app.view.doc;
+            if (doc && doc->error) {
+                view_draw_message(&app.view, r, "Could not open the file", doc->error);
+            } else if (doc && doc->block_count > 0) {
+                view_draw(&app.view, r);
+            } else if (!editor_visible() && SDL_GetAtomicInt(&app.loads_pending) == 0) {
+                view_draw_message(&app.view, r, "Drop a Markdown file here",
+                                  app.nvim_ok || !app.nvim.error ? "or press Ctrl+O to open one"
+                                                                 : app.nvim.error);
+            }
+        }
+        SDL_SetRenderViewport(r, NULL);
+    }
+    SDL_RenderPresent(r);
     app.dirty = false;
 }
 
-/* ------------------------------------------------------------ events -- */
+/* ------------------------------------------------------------- input -- */
 
-static bool handle_key(const SDL_KeyboardEvent *k)
+static void request_quit(void)
 {
-    const bool ctrl = (k->mod & SDL_KMOD_CTRL) != 0;
+    if (app.nvim_ok && app.nvim.attached && !nvim_has_exited(&app.nvim)) {
+        /* Let Neovim decide (it refuses with unsaved changes); md exits when
+         * nvim does. */
+        if (app.layout == LAYOUT_VIEWER) {
+            app.layout = LAYOUT_SPLIT;
+            app.focus = PANE_EDITOR;
+            relayout();
+        }
+        nvim_request_quit(&app.nvim);
+    } else {
+        app.quitting = true;
+    }
+}
+
+static const char *special_key_name(SDL_Keycode key)
+{
+    switch (key) {
+    case SDLK_RETURN: case SDLK_KP_ENTER: return "CR";
+    case SDLK_ESCAPE:    return "Esc";
+    case SDLK_BACKSPACE: return "BS";
+    case SDLK_TAB:       return "Tab";
+    case SDLK_DELETE:    return "Del";
+    case SDLK_INSERT:    return "Insert";
+    case SDLK_UP:        return "Up";
+    case SDLK_DOWN:      return "Down";
+    case SDLK_LEFT:      return "Left";
+    case SDLK_RIGHT:     return "Right";
+    case SDLK_HOME:      return "Home";
+    case SDLK_END:       return "End";
+    case SDLK_PAGEUP:    return "PageUp";
+    case SDLK_PAGEDOWN:  return "PageDown";
+    case SDLK_F1: return "F1";   case SDLK_F2: return "F2";   case SDLK_F3: return "F3";
+    case SDLK_F4: return "F4";   case SDLK_F5: return "F5";   case SDLK_F6: return "F6";
+    case SDLK_F7: return "F7";   case SDLK_F8: return "F8";   case SDLK_F9: return "F9";
+    case SDLK_F10: return "F10"; case SDLK_F11: return "F11"; case SDLK_F12: return "F12";
+    default: return NULL;
+    }
+}
+
+/* Key presses that do not produce SDL text input: special keys and
+ * Ctrl/Alt chords. Plain text (including AltGr characters such as Polish
+ * ą ś ó) arrives through SDL_EVENT_TEXT_INPUT instead. */
+static void editor_key(const SDL_KeyboardEvent *k)
+{
+    const bool altgr = (k->mod & SDL_KMOD_RALT) != 0;
+    const bool ctrl = (k->mod & SDL_KMOD_CTRL) != 0 && !altgr;
+    const bool alt = (k->mod & SDL_KMOD_LALT) != 0;
+    const bool shift = (k->mod & SDL_KMOD_SHIFT) != 0;
+
+    char mods[16] = "";
+    if (ctrl) SDL_strlcat(mods, "C-", sizeof(mods));
+    if (alt) SDL_strlcat(mods, "A-", sizeof(mods));
+
+    char keys[48];
+    const char *name = special_key_name(k->key);
+    if (name) {
+        SDL_snprintf(keys, sizeof(keys), "<%s%s%s>", shift ? "S-" : "", mods, name);
+        nvim_input(&app.nvim, keys);
+        return;
+    }
+    if (!(ctrl || alt)) return; /* text input handles it */
+
+    SDL_Keycode key = k->key;
+    if (key == SDLK_SPACE) {
+        SDL_snprintf(keys, sizeof(keys), "<%sSpace>", mods);
+    } else if (key >= 0x21 && key < 0x7f) {
+        char ch = (char)key;
+        if (shift && ch >= 'a' && ch <= 'z') ch = (char)(ch - 'a' + 'A');
+        if (ch == '<') SDL_snprintf(keys, sizeof(keys), "<%slt>", mods);
+        else if (ch == '\\') SDL_snprintf(keys, sizeof(keys), "<%sBslash>", mods);
+        else SDL_snprintf(keys, sizeof(keys), "<%s%c>", mods, ch);
+    } else {
+        return;
+    }
+    nvim_input(&app.nvim, keys);
+}
+
+static void editor_text(const char *text)
+{
+    /* nvim_input treats "<" as the start of a key name. */
+    char buf[256];
+    size_t n = 0;
+    for (const char *p = text; *p && n + 5 < sizeof(buf); ++p) {
+        if (*p == '<') { SDL_memcpy(buf + n, "<lt>", 4); n += 4; }
+        else buf[n++] = *p;
+    }
+    buf[n] = 0;
+    nvim_input(&app.nvim, buf);
+}
+
+static void viewer_key(const SDL_KeyboardEvent *k)
+{
     View *v = &app.view;
     const float line = view_line_height(v);
     const float page = SDL_max(v->height - 2 * line, line);
-
     switch (k->key) {
-    case SDLK_O:        if (ctrl) show_open_dialog(); return true;
-    case SDLK_Q:
-    case SDLK_W:        return !ctrl; /* Ctrl+Q / Ctrl+W quit */
     case SDLK_UP:       view_scroll_by(v, -line); break;
     case SDLK_DOWN:     view_scroll_by(v, line); break;
     case SDLK_PAGEUP:   view_scroll_by(v, -page); break;
     case SDLK_PAGEDOWN: view_scroll_by(v, page); break;
     case SDLK_SPACE:    view_scroll_by(v, (k->mod & SDL_KMOD_SHIFT) ? -page : page); break;
     case SDLK_HOME:     view_scroll_to(v, 0); break;
-    case SDLK_END:      view_scroll_to(v, v->content_height); break;
-    default:            return true;
+    case SDLK_END:      view_scroll_to_end(v); break;
+    default:            return;
     }
     app.dirty = true;
-    return true;
+}
+
+static void set_layout(Layout layout)
+{
+    if (!app.nvim_ok) return;
+    app.layout = app.layout == layout ? LAYOUT_SPLIT : layout;
+    if (app.layout == LAYOUT_SPLIT) app.focus = PANE_EDITOR;
+    relayout();
+}
+
+/* App shortcuts use Ctrl+Shift so they never collide with AltGr letters
+ * (AltGr = Ctrl+Alt on Windows) or with Neovim's own Ctrl mappings. */
+static bool app_shortcut(const SDL_KeyboardEvent *k)
+{
+    const bool ctrl = (k->mod & SDL_KMOD_CTRL) != 0;
+    const bool shift = (k->mod & SDL_KMOD_SHIFT) != 0;
+    const bool alt = (k->mod & SDL_KMOD_ALT) != 0;
+    if (!ctrl || !shift || alt) {
+        if (k->key == SDLK_O && ctrl && !shift && !alt && app.focus == PANE_VIEWER) {
+            show_open_dialog();
+            return true;
+        }
+        return false;
+    }
+    switch (k->key) {
+    case SDLK_O: /* split orientation */
+        app.vertical = !app.vertical;
+        relayout();
+        return true;
+    case SDLK_S: /* split on/off (off = viewer only) */
+        set_layout(LAYOUT_VIEWER);
+        return true;
+    case SDLK_E: /* editor only on/off */
+        set_layout(LAYOUT_EDITOR);
+        return true;
+    case SDLK_TAB: /* move keyboard focus between panes */
+        if (editor_visible() && viewer_visible()) {
+            app.focus = app.focus == PANE_EDITOR ? PANE_VIEWER : PANE_EDITOR;
+            relayout();
+        }
+        return true;
+    case SDLK_N: /* new file / open dialog */
+        show_open_dialog();
+        return true;
+    default:
+        return false;
+    }
+}
+
+static bool in_rect(const SDL_FRect *r, float x, float y)
+{
+    return r->w > 0 && x >= r->x && y >= r->y && x < r->x + r->w && y < r->y + r->h;
+}
+
+static void to_pixels(float *x, float *y)
+{
+    /* Mouse coordinates are in window points; layout is in pixels. */
+    float s = SDL_GetWindowPixelDensity(app.window);
+    *x *= s;
+    *y *= s;
+}
+
+static const char *mouse_mods(void)
+{
+    SDL_Keymod m = SDL_GetModState();
+    static char buf[8];
+    buf[0] = 0;
+    if (m & SDL_KMOD_CTRL) SDL_strlcat(buf, "C", sizeof(buf));
+    if (m & SDL_KMOD_SHIFT) SDL_strlcat(buf, "S", sizeof(buf));
+    if (m & SDL_KMOD_ALT) SDL_strlcat(buf, "A", sizeof(buf));
+    return buf;
+}
+
+static void editor_mouse(const char *button, const char *action, float x, float y)
+{
+    int row, col;
+    editor_cell_at(&app.editor, x - app.editor_rect.x, y - app.editor_rect.y, &row, &col);
+    nvim_input_mouse(&app.nvim, button, action, mouse_mods(), row, col);
+}
+
+static void set_hand_cursor(bool hand)
+{
+    static SDL_Cursor *pointer, *arrow;
+    static bool current;
+    if (hand == current) return;
+    if (!pointer) {
+        pointer = SDL_CreateSystemCursor(SDL_SYSTEM_CURSOR_POINTER);
+        arrow = SDL_CreateSystemCursor(SDL_SYSTEM_CURSOR_DEFAULT);
+    }
+    SDL_SetCursor(hand ? pointer : arrow);
+    current = hand;
+}
+
+/* Web links go to the browser; links to local Markdown files open in md
+ * (in the editor when it runs); other local files use the OS handler. */
+static void open_link(const char *url, size_t len)
+{
+    char *u = SDL_strndup(url, len);
+    if (u[0] == '#') { SDL_free(u); return; } /* in-page anchors: not yet */
+    if (SDL_strstr(u, "://") || SDL_strncasecmp(u, "mailto:", 7) == 0) {
+        SDL_OpenURL(u);
+        SDL_free(u);
+        return;
+    }
+    char *hash = SDL_strchr(u, '#');
+    if (hash) *hash = 0;
+    const char *doc_path = app.view.doc ? app.view.doc->path : NULL;
+    char *path = NULL;
+    bool absolute = u[0] == '/' || u[0] == '\\' || (u[0] && u[1] == ':');
+    const char *slash = NULL;
+    if (doc_path) for (const char *q = doc_path; *q; ++q) if (*q == '/' || *q == '\\') slash = q;
+    if (absolute || !slash) path = SDL_strdup(u);
+    else SDL_asprintf(&path, "%.*s/%s", (int)(slash - doc_path), doc_path, u);
+    size_t n = SDL_strlen(path);
+    bool markdown = (n > 3 && SDL_strcasecmp(path + n - 3, ".md") == 0) ||
+                    (n > 9 && SDL_strcasecmp(path + n - 9, ".markdown") == 0);
+    if (markdown) {
+        open_file(path);
+    } else {
+        char *file_url = NULL;
+        SDL_asprintf(&file_url, "file:///%s", path[0] == '/' ? path + 1 : path);
+        SDL_OpenURL(file_url);
+        SDL_free(file_url);
+    }
+    SDL_free(path);
+    SDL_free(u);
 }
 
 /* Returns false when the app should quit. */
@@ -177,51 +549,132 @@ static bool handle_event(const SDL_Event *e)
 {
     switch (e->type) {
     case SDL_EVENT_QUIT:
-        return false;
+        request_quit();
+        break;
     case SDL_EVENT_KEY_DOWN:
-        return handle_key(&e->key);
-    case SDL_EVENT_MOUSE_WHEEL:
-        view_scroll_by(&app.view, -e->wheel.y * 3 * view_line_height(&app.view));
-        app.dirty = true;
+        if (app_shortcut(&e->key)) break;
+        if ((e->key.mod & SDL_KMOD_CTRL) && !(e->key.mod & SDL_KMOD_RALT) &&
+            (e->key.key == SDLK_Q) && app.focus == PANE_VIEWER) {
+            request_quit();
+            break;
+        }
+        if (app.focus == PANE_EDITOR && app.nvim_ok) editor_key(&e->key);
+        else viewer_key(&e->key);
+        break;
+    case SDL_EVENT_TEXT_INPUT:
+        if (app.focus == PANE_EDITOR && app.nvim_ok) editor_text(e->text.text);
+        break;
+    case SDL_EVENT_MOUSE_WHEEL: {
+        float x = e->wheel.mouse_x, y = e->wheel.mouse_y;
+        to_pixels(&x, &y);
+        if (editor_visible() && in_rect(&app.editor_rect, x, y)) {
+            const char *dir = e->wheel.y > 0 ? "up" : "down";
+            int steps = (int)SDL_ceilf(SDL_fabsf(e->wheel.y));
+            for (int i = 0; i < steps && i < 10; ++i) editor_mouse("wheel", dir, x, y);
+        } else {
+            view_scroll_by(&app.view, -e->wheel.y * 3 * view_line_height(&app.view));
+            app.dirty = true;
+        }
+        break;
+    }
+    case SDL_EVENT_MOUSE_BUTTON_DOWN:
+    case SDL_EVENT_MOUSE_BUTTON_UP: {
+        float x = e->button.x, y = e->button.y;
+        to_pixels(&x, &y);
+        bool down = e->type == SDL_EVENT_MOUSE_BUTTON_DOWN;
+        if (down && e->button.button == SDL_BUTTON_LEFT && viewer_visible() &&
+            in_rect(&app.viewer_rect, x, y)) {
+            const char *url;
+            size_t len;
+            if (view_link_at(&app.view, x - app.viewer_rect.x, y - app.viewer_rect.y, &url, &len)) {
+                open_link(url, len);
+                break;
+            }
+        }
+        if (down) {
+            Pane target = editor_visible() && in_rect(&app.editor_rect, x, y) ? PANE_EDITOR : PANE_VIEWER;
+            if (target != app.focus) {
+                app.focus = target;
+                relayout();
+            }
+            app.mouse_down_editor = target == PANE_EDITOR;
+        }
+        if (app.mouse_down_editor && e->button.button <= SDL_BUTTON_RIGHT) {
+            const char *btn = e->button.button == SDL_BUTTON_LEFT ? "left"
+                            : e->button.button == SDL_BUTTON_RIGHT ? "right" : "middle";
+            editor_mouse(btn, down ? "press" : "release", x, y);
+        }
+        if (!down) app.mouse_down_editor = false;
+        break;
+    }
+    case SDL_EVENT_MOUSE_MOTION:
+        if (viewer_visible()) {
+            float x = e->motion.x, y = e->motion.y;
+            to_pixels(&x, &y);
+            const char *url;
+            size_t len;
+            bool link = in_rect(&app.viewer_rect, x, y) &&
+                        view_link_at(&app.view, x - app.viewer_rect.x, y - app.viewer_rect.y, &url, &len);
+            set_hand_cursor(link);
+        }
+        if (app.mouse_down_editor && (e->motion.state & SDL_BUTTON_LMASK)) {
+            float x = e->motion.x, y = e->motion.y;
+            to_pixels(&x, &y);
+            editor_mouse("left", "drag", x, y);
+        }
         break;
     case SDL_EVENT_DROP_FILE:
-        if (e->drop.data) start_load(e->drop.data);
+        if (e->drop.data) open_file(e->drop.data);
         break;
     case SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED:
     case SDL_EVENT_WINDOW_DISPLAY_SCALE_CHANGED:
-        if (app.fonts_ok) relayout();
+        relayout();
         break;
     case SDL_EVENT_WINDOW_EXPOSED:
         app.dirty = true;
         break;
     case SDL_EVENT_SYSTEM_THEME_CHANGED: {
         bool dark = SDL_GetSystemTheme() == SDL_SYSTEM_THEME_DARK;
-        if (dark != app.dark) {
+        if (dark != app.dark && app.fonts_ok) {
             app.dark = dark;
             /* Colours are baked into texts at creation; rebuild them. */
             Document *doc = app.view.doc;
             app.view.doc = NULL;
             app.view.theme = dark ? THEME_DARK : THEME_LIGHT;
-            view_set_document(&app.view, doc);
-            relayout();
+            view_set_document(&app.view, doc, true);
+            app.dirty = true;
         }
         break;
     }
     default:
-        if (e->type == app.wake_event) take_loaded_document();
+        if (e->type == app.wake_event) {
+            if (e->user.code == 1 && e->user.data1) { /* file dialog result */
+                open_file(e->user.data1);
+                SDL_free(e->user.data1);
+            }
+            take_loaded_document();
+            pump_nvim();
+            if (app.fonts_ok && images_pump(app.renderer)) {
+                view_relayout(&app.view);
+                app.dirty = true;
+            }
+            if (app.nvim_ok && nvim_has_exited(&app.nvim)) return false;
+        }
         break;
     }
-    return true;
+    return !app.quitting;
 }
 
 /* -------------------------------------------------------------- main -- */
 
 int main(int argc, char **argv)
 {
+    const char *file = argc > 1 ? argv[1] : NULL;
+
     /* 1. Kick off background work before touching the window system. */
     app.font_thread = SDL_CreateThread(font_thread_main, "md-fonts", NULL);
-    if (argc > 1) start_load(argv[1]);
-    nvim_start_async(&nvim, argc > 1 ? argv[1] : NULL);
+    if (file) start_load(file);
+    nvim_start_async(&app.nvim, file, 0);
 
     /* 2. Window + renderer. */
     SDL_SetHint(SDL_HINT_RENDER_VSYNC, "1");
@@ -230,9 +683,13 @@ int main(int argc, char **argv)
         return 1;
     }
     app.wake_event = SDL_RegisterEvents(1);
+    images_init(app.wake_event);
     app.dark = SDL_GetSystemTheme() == SDL_SYSTEM_THEME_DARK;
+    app.layout = LAYOUT_SPLIT;
+    app.vertical = true;
+    app.focus = PANE_EDITOR;
 
-    if (!SDL_CreateWindowAndRenderer(APP_NAME, 1100, 820,
+    if (!SDL_CreateWindowAndRenderer(APP_NAME, 1280, 820,
                                      SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY |
                                      SDL_WINDOW_HIDDEN,
                                      &app.window, &app.renderer)) {
@@ -240,12 +697,13 @@ int main(int argc, char **argv)
         return 1;
     }
 
-    /* 3. First frame: just the background colour, then show the window.
+    /* 3. First frame: just the background colours, then show the window.
      *    Presenting before showing avoids a white/black flash. */
     const Theme *theme = app.dark ? &THEME_DARK : &THEME_LIGHT;
-    SDL_SetRenderDrawColor(app.renderer, theme->bg.r, theme->bg.g, theme->bg.b, 0xFF);
-    SDL_RenderClear(app.renderer);
-    SDL_RenderPresent(app.renderer);
+    app.view.theme = *theme;
+    app.nvim_ok = true; /* assume the split until we know nvim failed */
+    relayout();
+    render();
     SDL_ShowWindow(app.window);
 
     /* 4. Text needs the fonts; by now they are usually ready. */
@@ -260,26 +718,44 @@ int main(int argc, char **argv)
         app.engine = TTF_CreateRendererTextEngine(app.renderer);
     }
     view_init(&app.view, app.engine, theme);
-    if (app.fonts_ok) {
-        relayout();
-        take_loaded_document(); /* in case the loader already finished */
-    }
+
+    /* 5. Neovim: process creation overlapped with everything above. */
+    app.nvim.wake_event = app.wake_event;
+    app.nvim_ok = app.fonts_ok && nvim_wait_started(&app.nvim);
+    if (app.nvim_ok) editor_init(&app.editor, app.engine, &app.nvim);
+    else app.layout = LAYOUT_VIEWER;
+
+    relayout(); /* also attaches the UI */
+    take_loaded_document(); /* in case the loader already finished */
     render();
 
-    /* 5. Event loop: sleep until something happens. */
+    /* 6. Event loop: sleep until something happens. */
     bool running = true;
     while (running) {
         SDL_Event e;
-        if (!SDL_WaitEvent(&e)) break;
+        if (app.fonts_ok && view_layout_pending(&app.view)) {
+            /* Lay out the rest of a long document while idle, in small
+             * slices so input stays responsive. */
+            if (!SDL_PollEvent(&e)) {
+                view_layout_more(&app.view, 4);
+                continue;
+            }
+        } else if (!SDL_WaitEvent(&e)) {
+            break;
+        }
         do {
             running = handle_event(&e);
         } while (running && SDL_PollEvent(&e));
         if (running && app.dirty) render();
     }
 
-    nvim_stop(&nvim);
+    if (app.nvim_ok) editor_destroy(&app.editor);
+    nvim_stop(&app.nvim);
     view_destroy(&app.view);
     document_free(SDL_SetAtomicPointer(&app.loaded_doc, NULL));
+    SDL_free(app.preview_pending_name);
+    SDL_free(app.preview_pending_text);
+    images_shutdown();
     if (app.engine) TTF_DestroyRendererTextEngine(app.engine);
     if (app.fonts_ok) fonts_shutdown();
     SDL_DestroyRenderer(app.renderer);

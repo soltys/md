@@ -3,27 +3,53 @@
 
 #include <SDL3/SDL.h>
 #include <SDL3_ttf/SDL_ttf.h>
+#include "editor.h"
+#include "nvim.h"
 #include "view.h"
 
 #define APP_NAME "md"
+
+typedef enum Layout {
+    LAYOUT_SPLIT,        /* editor + viewer */
+    LAYOUT_VIEWER,       /* viewer only (split disabled) */
+    LAYOUT_EDITOR,       /* editor only */
+} Layout;
+
+typedef enum Pane { PANE_EDITOR, PANE_VIEWER } Pane;
 
 typedef struct App {
     SDL_Window *window;
     SDL_Renderer *renderer;
     TTF_TextEngine *engine;
     View view;
+    Editor editor;
+    Nvim nvim;
+    bool nvim_ok;
 
     SDL_Thread *font_thread;
     bool fonts_ok;
 
-    /* Most recent document finished by a loader thread, not yet shown.
-     * Exchanged atomically between the loader and the main thread. */
+    /* Most recent document finished by a parser thread, not yet shown.
+     * Exchanged atomically between the worker and the main thread. */
     void *loaded_doc;
     SDL_AtomicInt loads_pending;
     Uint32 wake_event;
 
+    /* Live preview: at most one parse of editor text in flight. */
+    bool preview_parsing;
+    char *preview_pending_text;
+    size_t preview_pending_len;
+    char *preview_pending_name;
+
+    Layout layout;
+    bool vertical;       /* true: side by side, false: stacked */
+    Pane focus;
+    SDL_FRect editor_rect, viewer_rect;
+    bool mouse_down_editor;
+
     bool dark;
     bool dirty;
+    bool quitting;
 } App;
 
 #endif

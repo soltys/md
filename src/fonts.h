@@ -13,6 +13,8 @@ typedef enum FontFace {
     FONT_LIGHT,
     FONT_MONO,
     FONT_MONO_ITALIC,
+    FONT_MONO_BOLD,
+    FONT_MONO_BOLD_ITALIC,
     FONT_FACE_COUNT
 } FontFace;
 
@@ -24,6 +26,9 @@ bool fonts_init(float warm_px);
 /* Main thread only. Returns a font for the face at the given pixel size,
  * with Noto Color Emoji attached as fallback. Fonts are cached forever. */
 TTF_Font *fonts_get(FontFace face, float px);
+
+/* Noto Color Emoji at the given size (main thread only). */
+TTF_Font *fonts_get_emoji(float px);
 
 void fonts_shutdown(void);
 
