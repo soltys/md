@@ -65,8 +65,8 @@ start md with `-e`) to start Neovim and bring it in beside the preview. Neovim i
 you first ask for the editor, so a plain view never runs it. The preview
 follows the buffer as you type, and scrolling stays in sync both ways: scroll
 the editor and the preview follows, scroll the preview and the editor follows.
-Select text in the preview with the mouse (or Ctrl+A) and press Ctrl+C to copy (rich text; Ctrl+Shift+C for plain text)
-it. Without `nvim` on `PATH`, md stays a viewer and says why when you ask for
+Select text in the preview with the mouse (or Ctrl+A) and press Ctrl+C to copy
+it as rich text (Ctrl+Shift+C for plain text). Without `nvim` on `PATH`, md stays a viewer and says why when you ask for
 the editor.
 
 See [docs/features.md](docs/features.md) for a tour of everything md renders;
