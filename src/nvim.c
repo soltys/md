@@ -255,11 +255,13 @@ static const char attach_lua[] =
     "local g = vim.api.nvim_create_augroup('md_ui', { clear = true })\n"
     "vim.api.nvim_create_autocmd({ 'TextChanged', 'TextChangedI', 'TextChangedP', 'BufWinEnter', 'BufWritePost' }, {\n"
     "  group = g, callback = function() vim.rpcnotify(ch, 'md_changed') end })\n"
-    "local last = -1\n"
+    "local last = ''\n"
     "vim.api.nvim_create_autocmd({ 'CursorMoved', 'CursorMovedI', 'WinScrolled', 'BufWinEnter' }, {\n"
     "  group = g, callback = function()\n"
-    "    local top = vim.fn.line('w0')\n"
-    "    if top ~= last then last = top; vim.rpcnotify(ch, 'md_scroll', top) end\n"
+    "    local top, bot = vim.fn.line('w0'), vim.fn.line('w$')\n"
+    "    local at_end = top > 1 and bot >= vim.api.nvim_buf_line_count(0)\n"
+    "    local key = top .. (at_end and 'e' or '')\n"
+    "    if key ~= last then last = key; vim.rpcnotify(ch, 'md_scroll', top, at_end) end\n"
     "  end })\n";
 
 bool nvim_attach(Nvim *nv, int cols, int rows)
@@ -335,6 +337,11 @@ void nvim_scroll_to_line(Nvim *nv, int line)
         "local l = tonumber(...)\n"
         "local w = vim.api.nvim_get_current_win()\n"
         "local n = vim.api.nvim_buf_line_count(0)\n"
+        "if l <= 0 then\n" /* the preview is at its end: show the end of the file */
+        "  vim.api.nvim_win_set_cursor(w, { n, 0 })\n"
+        "  vim.fn.winrestview({ topline = math.max(1, n - vim.api.nvim_win_get_height(w) + 1) })\n"
+        "  return\n"
+        "end\n"
         "l = math.max(1, math.min(l, n))\n"
         "local h = vim.api.nvim_win_get_height(w)\n"
         "local so = math.min(vim.wo[w].scrolloff, math.floor((h - 1) / 2))\n"
@@ -602,7 +609,10 @@ bool nvim_process(Nvim *nv)
                 nv->text_changed = true;
                 changed = true;
             } else if (mp_str_eq(method, "md_scroll")) {
-                nv->top_line = (int)mp_int(mp_at(mp_at(m, 2), 0));
+                const MpObj *args = mp_at(m, 2);
+                const MpObj *end = mp_at(args, 1);
+                nv->top_line = (int)mp_int(mp_at(args, 0));
+                nv->at_end = end && end->type == MP_BOOL && end->v.b;
                 nv->scrolled = true;
                 changed = true;
             }

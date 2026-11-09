@@ -159,6 +159,15 @@ static bool viewer_visible(void)
     return !app.nvim_ok || app.layout != LAYOUT_EDITOR;
 }
 
+/* Editor -> preview: the same top line, or the end when the editor shows
+ * the end of the file (the preview is taller, a top line alone would leave
+ * the last part off screen). */
+static void follow_editor(void)
+{
+    if (app.nvim.at_end) view_scroll_to_end(&app.view);
+    else view_scroll_to_line(&app.view, app.nvim.top_line);
+}
+
 static void relayout(void)
 {
     int w = 0, h = 0;
@@ -196,7 +205,7 @@ static void relayout(void)
         /* A new size re-wraps both panes differently: line the preview up
          * with the editor again rather than keeping its old pixel offset. */
         if (editor_visible() && viewer_visible() && app.nvim.attached && app.nvim.top_line > 0) {
-            view_scroll_to_line(&app.view, app.nvim.top_line);
+            follow_editor();
         }
         if (app.nvim_ok) {
             editor_set_scale(&app.editor, scale);
@@ -242,7 +251,7 @@ static void take_loaded_document(void)
      * path spelling (relative on the command line, absolute from nvim). */
     bool follow = editor_visible() && app.nvim.attached && app.nvim.top_line > 0;
     view_set_document(&app.view, doc, same_file || follow);
-    if (follow) view_scroll_to_line(&app.view, app.nvim.top_line);
+    if (follow) follow_editor();
     update_title();
     app.dirty = true;
 
@@ -276,7 +285,7 @@ static void pump_nvim(void)
             bool echo = nv->top_line == app.sent_top ||
                         SDL_GetTicks() - app.sent_at < 250;
             if (viewer_visible() && !echo) {
-                view_scroll_to_line(&app.view, nv->top_line);
+                follow_editor();
                 app.dirty = true;
             }
         }
@@ -1235,11 +1244,12 @@ static void sync_editor_to_viewer(void)
 {
     app.viewer_scrolled = false;
     if (!editor_visible() || !viewer_visible() || !app.nvim.attached) return;
-    int line = view_top_line(&app.view);
-    if (line == app.sent_top && line == app.nvim.top_line) return;
+    int line = view_at_end(&app.view) ? 0 : view_top_line(&app.view);
+    if (line == app.sent_top && (line == 0 ? app.nvim.at_end : line == app.nvim.top_line)) return;
     app.sent_top = line;
     app.sent_at = SDL_GetTicks();
-    app.nvim.top_line = line;
+    if (line > 0) app.nvim.top_line = line;
+    app.nvim.at_end = line == 0;
     nvim_scroll_to_line(&app.nvim, line);
 }
 

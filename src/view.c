@@ -708,6 +708,12 @@ void view_scroll_by(View *v, float dy)
     view_scroll_to(v, v->scroll + dy);
 }
 
+bool view_at_end(const View *v)
+{
+    return v->doc && v->laid == v->item_count && v->scroll > 0 &&
+           v->scroll >= v->content_height - v->height - 1.0f;
+}
+
 void view_scroll_to_end(View *v)
 {
     layout_until(v, v->item_count, 0);
