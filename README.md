@@ -55,8 +55,11 @@ build\ninja-release\md.exe README.md
 md.exe file.md
 ```
 
-md opens with **Neovim on the left and the rendered preview on the right**.
-The preview follows the buffer as you type and scrolls along with the editor.
+md opens as a **viewer**: just the rendered Markdown. Press Ctrl+Shift+S to
+bring in Neovim beside it (Neovim starts in the background at launch, so this is
+instant). The preview follows the buffer as you type and scrolls along with the
+editor. Select text in the preview with the mouse (or Ctrl+A) and press Ctrl+C
+to copy it.
 Without `nvim` on `PATH`, md runs as a viewer only.
 
 See [docs/features.md](docs/features.md) for a tour of everything md renders;
@@ -65,11 +68,14 @@ open it in md to try it out.
 | Key | Action |
 | --- | --- |
 | Ctrl+Shift+O | Switch split orientation (side by side / stacked) |
-| Ctrl+Shift+S | Split on/off (off = preview only) |
+| Ctrl+Shift+S | Split on/off (off = preview only, the default) |
+| Ctrl+Shift+X | Swap sides: editor left/right (top/bottom when stacked) |
 | Ctrl+Shift+E | Editor only on/off |
 | Ctrl+Shift+Tab | Move keyboard focus between editor and preview |
 | Ctrl+Shift+N | Open a file (also: drop a file on the window) |
 | Ctrl+O / Ctrl+Q | Open / quit, when the preview has focus |
+| Ctrl+A / Ctrl+C | Select all / copy the selection, when the preview has focus |
+| Click a link | Open it (drag over a link to select its text instead) |
 | PgUp / PgDn / Space / Home / End, wheel | Scroll the preview |
 
 App shortcuts use Ctrl+Shift so they never clash with AltGr letters on Polish

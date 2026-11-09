@@ -1,19 +1,24 @@
 # md feature tour 🚀
 
 This file shows everything **md** can render. Open it with `md.exe docs\features.md`
-and edit it on the left: the preview on the right follows as you type.
+to view it, then press `Ctrl+Shift+S` to edit it beside the preview, which
+follows as you type.
 
 ## Keyboard shortcuts
 
 | Shortcut | What it does |
 | :--- | :--- |
 | `Ctrl+Shift+O` | Switch the split between side by side and stacked |
-| `Ctrl+Shift+S` | Split on/off (off shows only the preview) |
+| `Ctrl+Shift+S` | Split on/off (off shows only the preview, the default) |
+| `Ctrl+Shift+X` | Swap which side the editor is on |
 | `Ctrl+Shift+E` | Editor only on/off |
 | `Ctrl+Shift+Tab` | Move keyboard focus between editor and preview |
 | `Ctrl+Shift+N` | Open a file |
 | `Ctrl+O` | Open a file (when the preview has focus) |
 | `Ctrl+Q` | Quit (when the preview has focus) |
+| `Ctrl+A` | Select all text in the preview |
+| `Ctrl+C` | Copy the selected text (shows "Copied N characters") |
+| Mouse drag | Select text in the preview; Shift+click extends it |
 | `PgUp` / `PgDn` / `Space` / `Home` / `End` | Scroll the preview (when it has focus) |
 
 Everything else typed in the editor goes to Neovim. Closing the window asks

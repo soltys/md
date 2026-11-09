@@ -12,6 +12,8 @@
  * lazily the first time a fragment is drawn. */
 typedef struct Frag {
     float x, y, w, h;
+    float ax, ay;             /* absolute document position (selection) */
+    int item;                 /* owning item index */
     uint32_t str, len;        /* absolute offset into Document.strings */
     TTF_Font *font;
     TTF_Text *text;
@@ -43,6 +45,13 @@ typedef struct ViewItem {
     float box_y, box_h;       /* background box (code, tables) */
 } ViewItem;
 
+/* A position in the laid-out text: fragment index + byte offset in it.
+ * Fragments are stored in document order, so positions compare simply. */
+typedef struct SelPos {
+    int frag;
+    uint32_t off;
+} SelPos;
+
 typedef struct View {
     TTF_TextEngine *engine;
     Theme theme;
@@ -62,6 +71,9 @@ typedef struct View {
 
     TTF_Text *msg_title;
     TTF_Text *msg_body;
+
+    bool has_sel;
+    SelPos sel_anchor, sel_focus;
 } View;
 
 void view_init(View *v, TTF_TextEngine *engine, const Theme *theme);
@@ -94,6 +106,15 @@ float view_line_height(const View *v);
 bool view_link_at(View *v, float x, float y, const char **url, size_t *len);
 
 void view_draw(View *v, SDL_Renderer *r);
+
+/* Text selection; x/y are viewport pixels. */
+void view_select_start(View *v, float x, float y);
+void view_select_extend(View *v, float x, float y);
+void view_select_all(View *v);
+void view_select_clear(View *v);
+bool view_has_selection(const View *v);
+/* Selected text as UTF-8 (SDL_free it), NULL when nothing is selected. */
+char *view_selection_text(View *v);
 
 /* Centered two-line message, used for the welcome and error screens. */
 void view_draw_message(View *v, SDL_Renderer *r, const char *title, const char *body);

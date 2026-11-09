@@ -168,15 +168,18 @@ static void relayout(void)
 
     if (editor_visible() && viewer_visible()) {
         float gap = SDL_max(1.0f, SDL_floorf(scale));
+        SDL_FRect first, second;
         if (app.vertical) {
             float half = SDL_floorf((float)w * 0.5f);
-            app.editor_rect = (SDL_FRect){0, 0, half, (float)h};
-            app.viewer_rect = (SDL_FRect){half + gap, 0, (float)w - half - gap, (float)h};
+            first = (SDL_FRect){0, 0, half, (float)h};
+            second = (SDL_FRect){half + gap, 0, (float)w - half - gap, (float)h};
         } else {
             float half = SDL_floorf((float)h * 0.5f);
-            app.editor_rect = (SDL_FRect){0, 0, (float)w, half};
-            app.viewer_rect = (SDL_FRect){0, half + gap, (float)w, (float)h - half - gap};
+            first = (SDL_FRect){0, 0, (float)w, half};
+            second = (SDL_FRect){0, half + gap, (float)w, (float)h - half - gap};
         }
+        app.editor_rect = app.editor_second ? second : first;
+        app.viewer_rect = app.editor_second ? first : second;
     } else if (editor_visible()) {
         app.editor_rect = full;
         app.viewer_rect = none;
@@ -266,6 +269,51 @@ static void pump_nvim(void)
     }
 }
 
+static Uint32 SDLCALL toast_expired(void *userdata, SDL_TimerID id, Uint32 interval)
+{
+    (void)userdata; (void)id; (void)interval;
+    wake_main_thread(); /* the wake handler redraws once the toast is due */
+    return 0;
+}
+
+static void show_toast(const char *msg)
+{
+    SDL_strlcpy(app.toast, msg, sizeof app.toast);
+    app.toast_until = SDL_GetTicks() + 1500;
+    SDL_AddTimer(1550, toast_expired, NULL);
+    app.dirty = true;
+}
+
+/* A small pill centred at the bottom of the viewer (or the window). */
+static void draw_toast(SDL_Renderer *r)
+{
+    if (!app.toast[0] || !app.fonts_ok) return;
+    if (SDL_GetTicks() >= app.toast_until) {
+        app.toast[0] = '\0';
+        return;
+    }
+    float scale = display_scale();
+    TTF_Font *font = fonts_get(FONT_MEDIUM, 14.0f * scale);
+    if (!font) return;
+    TTF_Text *text = TTF_CreateText(app.engine, font, app.toast, 0);
+    if (!text) return;
+    int tw = 0, th = 0;
+    TTF_GetTextSize(text, &tw, &th);
+    const SDL_FRect *area = app.viewer_rect.w > 0 ? &app.viewer_rect : &app.editor_rect;
+    float pad_x = 16 * scale, pad_y = 8 * scale;
+    SDL_FRect box = {area->x + SDL_floorf((area->w - tw) * 0.5f) - pad_x,
+                     area->y + area->h - th - 2 * pad_y - 24 * scale,
+                     tw + 2 * pad_x, th + 2 * pad_y};
+    SDL_SetRenderDrawBlendMode(r, SDL_BLENDMODE_BLEND);
+    if (app.dark) SDL_SetRenderDrawColor(r, 0xE6, 0xE6, 0xEA, 0xF0);
+    else SDL_SetRenderDrawColor(r, 0x24, 0x27, 0x2E, 0xF0);
+    SDL_RenderFillRect(r, &box);
+    if (app.dark) TTF_SetTextColor(text, 0x1E, 0x1E, 0x2E, 0xFF);
+    else TTF_SetTextColor(text, 0xFF, 0xFF, 0xFF, 0xFF);
+    TTF_DrawRendererText(text, box.x + pad_x, box.y + pad_y);
+    TTF_DestroyText(text);
+}
+
 static void render(void)
 {
     SDL_Renderer *r = app.renderer;
@@ -302,6 +350,7 @@ static void render(void)
         }
         SDL_SetRenderViewport(r, NULL);
     }
+    draw_toast(r);
     SDL_RenderPresent(r);
     app.dirty = false;
 }
@@ -426,6 +475,28 @@ static void set_layout(Layout layout)
     relayout();
 }
 
+static void copy_selection(void)
+{
+    char *text = view_selection_text(&app.view);
+    if (!text || !text[0]) {
+        SDL_free(text);
+        show_toast("Nothing selected");
+        return;
+    }
+    size_t chars = 0;
+    for (const unsigned char *p = (const unsigned char *)text; *p; ++p) {
+        if ((*p & 0xC0) != 0x80) ++chars;
+    }
+    char msg[96];
+    if (SDL_SetClipboardText(text)) {
+        SDL_snprintf(msg, sizeof msg, "Copied %zu character%s", chars, chars == 1 ? "" : "s");
+    } else {
+        SDL_snprintf(msg, sizeof msg, "Could not copy: %s", SDL_GetError());
+    }
+    show_toast(msg);
+    SDL_free(text);
+}
+
 /* App shortcuts use Ctrl+Shift so they never collide with AltGr letters
  * (AltGr = Ctrl+Alt on Windows) or with Neovim's own Ctrl mappings. */
 static bool app_shortcut(const SDL_KeyboardEvent *k)
@@ -434,13 +505,28 @@ static bool app_shortcut(const SDL_KeyboardEvent *k)
     const bool shift = (k->mod & SDL_KMOD_SHIFT) != 0;
     const bool alt = (k->mod & SDL_KMOD_ALT) != 0;
     if (!ctrl || !shift || alt) {
-        if (k->key == SDLK_O && ctrl && !shift && !alt && app.focus == PANE_VIEWER) {
+        if (!ctrl || shift || alt || app.focus != PANE_VIEWER) return false;
+        switch (k->key) {
+        case SDLK_O:
             show_open_dialog();
             return true;
+        case SDLK_A:
+            view_select_all(&app.view);
+            app.dirty = true;
+            return true;
+        case SDLK_C:
+        case SDLK_INSERT:
+            copy_selection();
+            return true;
+        default:
+            return false;
         }
-        return false;
     }
     switch (k->key) {
+    case SDLK_X: /* swap which side the editor is on */
+        app.editor_second = !app.editor_second;
+        relayout();
+        return true;
     case SDLK_O: /* split orientation */
         app.vertical = !app.vertical;
         relayout();
@@ -582,14 +668,35 @@ static bool handle_event(const SDL_Event *e)
         float x = e->button.x, y = e->button.y;
         to_pixels(&x, &y);
         bool down = e->type == SDL_EVENT_MOUSE_BUTTON_DOWN;
+        float vx = x - app.viewer_rect.x, vy = y - app.viewer_rect.y;
+        if (e->button.button == SDL_BUTTON_LEFT && !down && app.selecting) {
+            /* A click (no drag) on a link opens it; otherwise it just
+             * clears the selection. */
+            app.selecting = false;
+            if (!app.sel_dragged) {
+                const char *url;
+                size_t len;
+                view_select_clear(&app.view);
+                app.dirty = true;
+                if (in_rect(&app.viewer_rect, x, y) && view_link_at(&app.view, vx, vy, &url, &len)) {
+                    open_link(url, len);
+                }
+            }
+            break;
+        }
         if (down && e->button.button == SDL_BUTTON_LEFT && viewer_visible() &&
             in_rect(&app.viewer_rect, x, y)) {
-            const char *url;
-            size_t len;
-            if (view_link_at(&app.view, x - app.viewer_rect.x, y - app.viewer_rect.y, &url, &len)) {
-                open_link(url, len);
-                break;
+            if ((SDL_GetModState() & SDL_KMOD_SHIFT) && app.view.has_sel) {
+                view_select_extend(&app.view, vx, vy);
+                app.sel_dragged = true;
+            } else {
+                view_select_start(&app.view, vx, vy);
+                app.sel_dragged = false;
             }
+            app.selecting = true;
+            app.press_x = x;
+            app.press_y = y;
+            app.dirty = true;
         }
         if (down) {
             Pane target = editor_visible() && in_rect(&app.editor_rect, x, y) ? PANE_EDITOR : PANE_VIEWER;
@@ -616,6 +723,23 @@ static bool handle_event(const SDL_Event *e)
             bool link = in_rect(&app.viewer_rect, x, y) &&
                         view_link_at(&app.view, x - app.viewer_rect.x, y - app.viewer_rect.y, &url, &len);
             set_hand_cursor(link);
+        }
+        if (app.selecting && (e->motion.state & SDL_BUTTON_LMASK)) {
+            float x = e->motion.x, y = e->motion.y;
+            to_pixels(&x, &y);
+            float slop = 4 * display_scale();
+            if (!app.sel_dragged &&
+                (SDL_fabsf(x - app.press_x) > slop || SDL_fabsf(y - app.press_y) > slop)) {
+                app.sel_dragged = true;
+            }
+            if (app.sel_dragged) {
+                /* Dragging past the top/bottom edge scrolls. */
+                const SDL_FRect *vr = &app.viewer_rect;
+                if (y < vr->y) view_scroll_by(&app.view, y - vr->y);
+                else if (y > vr->y + vr->h) view_scroll_by(&app.view, y - (vr->y + vr->h));
+                view_select_extend(&app.view, x - vr->x, y - vr->y);
+                app.dirty = true;
+            }
         }
         if (app.mouse_down_editor && (e->motion.state & SDL_BUTTON_LMASK)) {
             float x = e->motion.x, y = e->motion.y;
@@ -652,6 +776,7 @@ static bool handle_event(const SDL_Event *e)
                 open_file(e->user.data1);
                 SDL_free(e->user.data1);
             }
+            if (app.toast[0] && SDL_GetTicks() >= app.toast_until) app.dirty = true;
             take_loaded_document();
             pump_nvim();
             if (app.fonts_ok && images_pump(app.renderer)) {
@@ -685,9 +810,11 @@ int main(int argc, char **argv)
     app.wake_event = SDL_RegisterEvents(1);
     images_init(app.wake_event);
     app.dark = SDL_GetSystemTheme() == SDL_SYSTEM_THEME_DARK;
-    app.layout = LAYOUT_SPLIT;
+    /* Open as a viewer; Ctrl+Shift+S brings in the editor. Neovim still
+     * starts in the background so that is instant. */
+    app.layout = LAYOUT_VIEWER;
     app.vertical = true;
-    app.focus = PANE_EDITOR;
+    app.focus = PANE_VIEWER;
 
     if (!SDL_CreateWindowAndRenderer(APP_NAME, 1280, 820,
                                      SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY |
@@ -701,7 +828,7 @@ int main(int argc, char **argv)
      *    Presenting before showing avoids a white/black flash. */
     const Theme *theme = app.dark ? &THEME_DARK : &THEME_LIGHT;
     app.view.theme = *theme;
-    app.nvim_ok = true; /* assume the split until we know nvim failed */
+    app.nvim_ok = true; /* assume nvim works until we know it failed */
     relayout();
     render();
     SDL_ShowWindow(app.window);

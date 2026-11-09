@@ -24,6 +24,8 @@ static bool is_boxed(const Block *b)
     return b->kind == BLOCK_CODE || b->kind == BLOCK_HTML || b->kind == BLOCK_TABLE;
 }
 
+void view_draw_selection(View *v, SDL_Renderer *r);
+
 /* ------------------------------------------------------------ layout -- */
 
 typedef struct TextStyle {
@@ -49,6 +51,7 @@ enum { TOK_WORD, TOK_SPACE, TOK_NEWLINE, TOK_IMAGE };
 
 static Tok *toks;
 static int tok_count, tok_cap;
+static int layout_item_index; /* item being laid out, stamped on fragments */
 
 static FontFace styled_face(FontFace base, uint16_t style)
 {
@@ -303,6 +306,7 @@ static float layout_text(View *v, Para *out, uint32_t text_off, uint32_t len,
                     f.url = t->url;
                     f.url_len = t->url_len;
                     f.img = t->kind == TOK_IMAGE ? t->img : NULL;
+                    f.item = layout_item_index;
                     push_frag(v, &f);
                     cur = &v->frags[v->frag_count - 1];
                 } else {
@@ -441,9 +445,18 @@ static float content_x0(const View *v, float *content_w)
     return SDL_floorf((v->width - cw) * 0.5f);
 }
 
+static void anchor_para(View *v, const Para *p, float ox, float oy)
+{
+    for (int i = p->first; i < p->first + p->count; ++i) {
+        v->frags[i].ax = ox + v->frags[i].x;
+        v->frags[i].ay = oy + v->frags[i].y;
+    }
+}
+
 static void layout_item(View *v, int idx)
 {
     ViewItem *it = &v->items[idx];
+    layout_item_index = idx;
     const Block *b = it->block;
     const Document *doc = v->doc;
     const float s = v->scale;
@@ -526,12 +539,21 @@ static void layout_item(View *v, int idx)
     }
     }
     (void)doc;
+    /* Absolute positions for hit testing / selection. */
+    anchor_para(v, &it->para, it->x, it->y);
+    anchor_para(v, &it->marker, it->x - it->marker.w - 8 * s, it->y);
+    if (b->kind == BLOCK_TABLE) {
+        for (uint32_t c = 0; c < b->cell_count; ++c) {
+            anchor_para(v, &it->cells[c].para, it->x + it->cells[c].x, it->y + it->cells[c].y);
+        }
+    }
     v->next_y = y;
     v->content_height = y + MARGIN * s;
 }
 
 static void destroy_texts(View *v)
 {
+    v->has_sel = false;
     for (int i = 0; i < v->frag_count; ++i) {
         if (v->frags[i].text) TTF_DestroyText(v->frags[i].text);
     }
@@ -872,6 +894,7 @@ void view_draw(View *v, SDL_Renderer *r)
         }
         draw_para(v, r, &it->para, it->x, it->y + dy);
     }
+    view_draw_selection(v, r);
 }
 
 static bool para_link_at(View *v, const Para *p, float ox, float oy, float x, float y,
@@ -933,4 +956,155 @@ void view_draw_message(View *v, SDL_Renderer *r, const char *title, const char *
     float y = SDL_floorf((v->height - (float)(th + bh) - 12 * s) * 0.5f);
     TTF_DrawRendererText(v->msg_title, SDL_floorf((v->width - (float)tw) * 0.5f), y);
     TTF_DrawRendererText(v->msg_body, SDL_floorf((v->width - (float)bw) * 0.5f), y + (float)th + 12 * s);
+}
+
+/* ---------------------------------------------------------- selection -- */
+
+static int pos_cmp(SelPos a, SelPos b)
+{
+    if (a.frag != b.frag) return a.frag < b.frag ? -1 : 1;
+    return a.off < b.off ? -1 : a.off > b.off ? 1 : 0;
+}
+
+static bool hit(View *v, float x, float y, SelPos *out)
+{
+    if (!v->doc || v->frag_count == 0) return false;
+    float dx = x, dy = y + v->scroll;
+    int best = -1;
+    float best_d = 1e30f;
+    for (int i = 0; i < v->frag_count; ++i) {
+        const Frag *f = &v->frags[i];
+        float vy = dy < f->ay ? f->ay - dy : dy > f->ay + f->h ? dy - (f->ay + f->h) : 0;
+        float vx = dx < f->ax ? f->ax - dx : dx > f->ax + f->w ? dx - (f->ax + f->w) : 0;
+        float d = vy * 1000.0f + vx;
+        if (d < best_d) { best_d = d; best = i; }
+    }
+    if (best < 0) return false;
+    const Frag *f = &v->frags[best];
+    out->frag = best;
+    if (dx <= f->ax || f->img) out->off = (dx > f->ax + f->w * 0.5f && f->img) ? f->len : 0;
+    else if (dx >= f->ax + f->w) out->off = f->len;
+    else {
+        size_t bytes = 0;
+        int mw = 0;
+        TTF_MeasureString(f->font, v->doc->strings + f->str, f->len, (int)(dx - f->ax), &mw, &bytes);
+        out->off = (uint32_t)bytes;
+    }
+    if (dy > f->ay + f->h && best_d >= 1000.0f) out->off = f->len; /* below the line: to its end */
+    return true;
+}
+
+void view_select_start(View *v, float x, float y)
+{
+    SelPos p;
+    if (!hit(v, x, y, &p)) { v->has_sel = false; return; }
+    v->sel_anchor = v->sel_focus = p;
+    v->has_sel = true;
+}
+
+void view_select_extend(View *v, float x, float y)
+{
+    SelPos p;
+    if (!v->has_sel || !hit(v, x, y, &p)) return;
+    v->sel_focus = p;
+}
+
+void view_select_all(View *v)
+{
+    if (!v->doc) return;
+    layout_until(v, v->item_count, 0);
+    if (v->frag_count == 0) return;
+    v->sel_anchor.frag = 0;
+    v->sel_anchor.off = 0;
+    v->sel_focus.frag = v->frag_count - 1;
+    v->sel_focus.off = v->frags[v->frag_count - 1].len;
+    v->has_sel = true;
+}
+
+void view_select_clear(View *v) { v->has_sel = false; }
+
+bool view_has_selection(const View *v)
+{
+    return v->has_sel && pos_cmp(v->sel_anchor, v->sel_focus) != 0;
+}
+
+static void sel_range(const View *v, SelPos *a, SelPos *b)
+{
+    if (pos_cmp(v->sel_anchor, v->sel_focus) <= 0) { *a = v->sel_anchor; *b = v->sel_focus; }
+    else { *a = v->sel_focus; *b = v->sel_anchor; }
+}
+
+static float measure_prefix(const Frag *f, const char *str, uint32_t off)
+{
+    if (off == 0) return 0;
+    if (off >= f->len || f->img) return f->w;
+    int w = 0, h = 0;
+    TTF_GetStringSize(f->font, str, off, &w, &h);
+    return (float)w;
+}
+
+void view_draw_selection(View *v, SDL_Renderer *r)
+{
+    if (!view_has_selection(v)) return;
+    SelPos a, b;
+    sel_range(v, &a, &b);
+    SDL_Color c = v->theme.accent;
+    c.a = 0x48;
+    SDL_SetRenderDrawBlendMode(r, SDL_BLENDMODE_BLEND);
+    set_color(r, c);
+    const float top = v->scroll, bottom = v->scroll + v->height;
+    for (int i = a.frag; i <= b.frag && i < v->frag_count; ++i) {
+        const Frag *f = &v->frags[i];
+        if (f->ay + f->h < top) continue;
+        if (f->ay > bottom) break;
+        const char *str = v->doc->strings + f->str;
+        float x0 = i == a.frag ? measure_prefix(f, str, a.off) : 0;
+        float x1 = i == b.frag ? measure_prefix(f, str, b.off) : f->w;
+        /* Bridge the gap (spaces) to the next selected fragment on this line. */
+        if (i < b.frag && i + 1 < v->frag_count) {
+            const Frag *n = &v->frags[i + 1];
+            if (SDL_fabsf(n->ay - f->ay) < 1.0f && n->ax > f->ax) x1 = n->ax - f->ax;
+        }
+        if (x1 <= x0) continue;
+        SDL_FRect rect = {f->ax + x0, f->ay - v->scroll, x1 - x0, f->h};
+        SDL_RenderFillRect(r, &rect);
+    }
+}
+
+char *view_selection_text(View *v)
+{
+    if (!view_has_selection(v)) return NULL;
+    SelPos a, b;
+    sel_range(v, &a, &b);
+    size_t cap = 256, len = 0;
+    char *out = SDL_malloc(cap);
+    for (int i = a.frag; i <= b.frag && i < v->frag_count; ++i) {
+        const Frag *f = &v->frags[i];
+        uint32_t s = i == a.frag ? a.off : 0;
+        uint32_t e = i == b.frag ? b.off : f->len;
+        if (i > a.frag) {
+            const Frag *p = &v->frags[i - 1];
+            const char *sep = NULL;
+            if (p->item != f->item) sep = "\n";
+            else if (SDL_fabsf(p->ay - f->ay) >= 1.0f) {
+                bool pre = v->items[f->item].block->kind == BLOCK_CODE ||
+                           v->items[f->item].block->kind == BLOCK_HTML ||
+                           v->items[f->item].block->kind == BLOCK_TABLE;
+                sep = pre ? "\n" : " ";
+            } else if (f->ax > p->ax + p->w + 0.5f) {
+                sep = v->items[f->item].block->kind == BLOCK_TABLE ? "\t" : " ";
+            }
+            if (sep) {
+                if (len + 2 > cap) { cap *= 2; out = SDL_realloc(out, cap); }
+                out[len++] = sep[0];
+            }
+        }
+        if (f->img || e <= s) continue;
+        size_t n = e - s;
+        if (len + n + 2 > cap) { while (len + n + 2 > cap) cap *= 2; out = SDL_realloc(out, cap); }
+        SDL_memcpy(out + len, v->doc->strings + f->str + s, n);
+        len += n;
+    }
+    out[len] = 0;
+    return out;
 }

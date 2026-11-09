@@ -43,9 +43,19 @@ typedef struct App {
 
     Layout layout;
     bool vertical;       /* true: side by side, false: stacked */
+    bool editor_second;  /* editor on the right / bottom instead of left / top */
     Pane focus;
     SDL_FRect editor_rect, viewer_rect;
     bool mouse_down_editor;
+
+    /* Viewer text selection by mouse. */
+    bool selecting;      /* left button went down in the viewer */
+    bool sel_dragged;    /* moved far enough to count as a drag */
+    float press_x, press_y;
+
+    /* Short status message ("Copied ...") drawn over the viewer. */
+    char toast[96];
+    Uint64 toast_until;  /* SDL_GetTicks() deadline */
 
     bool dark;
     bool dirty;
