@@ -195,6 +195,56 @@ static bool predicates_ok(TSQuery *q, const TSQueryMatch *m, const char *code)
     return true;
 }
 
+/* ---------------------------------------------------------- cache -- */
+
+/* Recent results by (language, code). Parser threads can overlap (file load
+ * and live preview), hence the lock. */
+#define CACHE_SLOTS 64
+typedef struct CacheEntry { uint64_t key; size_t len; Span *spans; uint32_t count; } CacheEntry;
+static CacheEntry cache[CACHE_SLOTS];
+static uint32_t cache_next;
+static SDL_SpinLock cache_lock;
+
+static uint64_t cache_key(const Lang *l, const char *code, size_t len)
+{
+    uint64_t h = 1469598103934665603ull ^ (uint64_t)(uintptr_t)l;
+    for (size_t i = 0; i < len; ++i) { h ^= (unsigned char)code[i]; h *= 1099511628211ull; }
+    return h;
+}
+
+static bool cache_lookup(uint64_t key, size_t len, Span **spans, uint32_t *count, uint32_t *cap)
+{
+    bool hit = false;
+    SDL_LockSpinlock(&cache_lock);
+    for (int i = 0; i < CACHE_SLOTS; ++i) {
+        const CacheEntry *e = &cache[i];
+        if (!e->spans || e->key != key || e->len != len) continue;
+        if (*count + e->count > *cap) {
+            while (*count + e->count > *cap) *cap = *cap ? *cap * 2 : 256;
+            *spans = SDL_realloc(*spans, sizeof(Span) * (size_t)*cap);
+        }
+        SDL_memcpy(*spans + *count, e->spans, sizeof(Span) * e->count);
+        *count += e->count;
+        hit = true;
+        break;
+    }
+    SDL_UnlockSpinlock(&cache_lock);
+    return hit;
+}
+
+static void cache_store(uint64_t key, size_t len, const Span *spans, uint32_t count)
+{
+    Span *copy = SDL_malloc(sizeof(Span) * (count ? count : 1));
+    if (!copy) return;
+    if (count) SDL_memcpy(copy, spans, sizeof(Span) * count);
+    SDL_LockSpinlock(&cache_lock);
+    CacheEntry *e = &cache[cache_next++ % CACHE_SLOTS];
+    Span *old = e->spans;
+    *e = (CacheEntry){key, len, copy, count};
+    SDL_UnlockSpinlock(&cache_lock);
+    SDL_free(old);
+}
+
 void highlight_code(const char *lang, size_t lang_len, const char *code, size_t len,
                     Span **spans, uint32_t *count, uint32_t *cap)
 {
@@ -207,6 +257,12 @@ void highlight_code(const char *lang, size_t lang_len, const char *code, size_t 
     uint8_t *classes = NULL;
     TSQuery *q = get_query(l, &classes);
     if (!q) return;
+
+    /* The live preview re-parses the whole document on every edit, but
+     * usually only one code block (if any) changed: reuse the others. */
+    const uint64_t key = cache_key(l, code, len);
+    if (cache_lookup(key, len, spans, count, cap)) return;
+    const uint32_t first = *count;
 
     TSParser *parser = ts_parser_new();
     ts_parser_set_language(parser, l->language());
@@ -265,4 +321,5 @@ void highlight_code(const char *lang, size_t lang_len, const char *code, size_t 
     SDL_free(cls);
     SDL_free(size);
     SDL_free(pat);
+    cache_store(key, len, *spans + first, *count - first);
 }

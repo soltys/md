@@ -75,11 +75,57 @@ static void push_tok(const Tok *t)
     toks[tok_count++] = *t;
 }
 
+/* Word widths, cached by (font, text). Measuring shapes the text with
+ * HarfBuzz; the same words come back on every relayout (each keystroke of
+ * the live preview re-lays out the document, and so does a resize), so most
+ * lookups hit. Main thread only; fonts live until shutdown. */
+typedef struct WidthEntry { uint64_t hash; TTF_Font *font; uint32_t len; int w; } WidthEntry;
+static WidthEntry *width_cache;
+static uint32_t width_cap, width_count;
+
+static uint64_t hash_bytes(const char *p, size_t n)
+{
+    uint64_t h = 1469598103934665603ull; /* FNV-1a */
+    for (size_t i = 0; i < n; ++i) { h ^= (unsigned char)p[i]; h *= 1099511628211ull; }
+    return h;
+}
+
+static int text_width(TTF_Font *font, const char *str, uint32_t len)
+{
+    if (len == 0) return 0;
+    const uint64_t h = hash_bytes(str, len) ^ ((uint64_t)(uintptr_t)font * 0x9E3779B97F4A7C15ull);
+    if (width_count * 2 >= width_cap) { /* grow, or start over when huge */
+        uint32_t cap = width_cap ? width_cap * 2 : 1u << 14;
+        if (cap > (1u << 21)) { cap = width_cap; width_count = 0; SDL_memset(width_cache, 0, sizeof(WidthEntry) * cap); }
+        else {
+            WidthEntry *old = width_cache;
+            uint32_t old_cap = width_cap;
+            width_cache = SDL_calloc(cap, sizeof(WidthEntry));
+            width_cap = cap;
+            for (uint32_t i = 0; i < old_cap; ++i) {
+                if (!old[i].font) continue;
+                uint32_t j = (uint32_t)old[i].hash & (cap - 1);
+                while (width_cache[j].font) j = (j + 1) & (cap - 1);
+                width_cache[j] = old[i];
+            }
+            SDL_free(old);
+        }
+    }
+    uint32_t j = (uint32_t)h & (width_cap - 1);
+    for (; width_cache[j].font; j = (j + 1) & (width_cap - 1)) {
+        const WidthEntry *e = &width_cache[j];
+        if (e->hash == h && e->font == font && e->len == len) return e->w;
+    }
+    int w = 0, hh = 0;
+    TTF_GetStringSize(font, str, len, &w, &hh);
+    width_cache[j] = (WidthEntry){h, font, len, w};
+    width_count++;
+    return w;
+}
+
 static void measure(Tok *t, const char *text)
 {
-    int w = 0, h = 0;
-    if (t->len) TTF_GetStringSize(t->font, text + t->start, t->len, &w, &h);
-    t->w = (float)w;
+    t->w = (float)text_width(t->font, text + t->start, t->len);
     t->ascent = (float)TTF_GetFontAscent(t->font);
     t->lineskip = (float)TTF_GetFontLineSkip(t->font);
     t->h = t->lineskip;
@@ -624,6 +670,9 @@ void view_init(View *v, TTF_TextEngine *engine, const Theme *theme)
 
 void view_destroy(View *v)
 {
+    SDL_free(width_cache);
+    width_cache = NULL;
+    width_cap = width_count = 0;
     free_items(v);
     SDL_free(v->frags);
     v->frags = NULL;
