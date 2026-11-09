@@ -134,7 +134,7 @@ static void start(Sprite *s, char *args, const char *file, int line)
     }
     SDL_strlcpy(s->name, tok, sizeof s->name);
     while ((tok = SDL_strtok_r(NULL, " \t", &save)) != NULL) {
-        char *end;
+        char *end = tok;
         long k = (tok[0] == 'x' || tok[0] == 'X') ? SDL_strtol(tok + 1, &end, 10) : 0;
         if (k < 1 || k > 64 || *end) {
             fail(file, line, "bad scale '%s' (use x1 .. x64)", tok);
