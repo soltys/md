@@ -114,15 +114,33 @@ else()
 endif()
 
 # Install: md.exe is self-contained (fonts and the Neovim config are
-# embedded), so installing is copying one file. Defaults to a per-user
-# folder that needs no admin rights: %LOCALAPPDATA%\Programs\md\bin.
-#   cmake --build --preset release --target install
+# embedded), so installing is copying one file. On Windows the default is
+# the current user's Documents\PathApps (a folder meant to be on PATH;
+# Documents is asked from Windows, so a OneDrive-redirected one works too).
+#   cmake --build --preset install
 #   cmake --install build/vs2026 --config Release [--prefix <dir>]
-if(WIN32 AND CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT AND DEFINED ENV{LOCALAPPDATA})
-    file(TO_CMAKE_PATH "$ENV{LOCALAPPDATA}/Programs/md" _md_prefix)
-    set(CMAKE_INSTALL_PREFIX "${_md_prefix}" CACHE PATH "Install location" FORCE)
+if(WIN32)
+    set(_md_old_default "")
+    if(DEFINED ENV{LOCALAPPDATA})
+        file(TO_CMAKE_PATH "$ENV{LOCALAPPDATA}/Programs/md" _md_old_default)
+    endif()
+    if(CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT OR CMAKE_INSTALL_PREFIX STREQUAL _md_old_default)
+        execute_process(
+            COMMAND powershell -NoProfile -NonInteractive -Command
+                    "[Environment]::GetFolderPath('MyDocuments')"
+            OUTPUT_VARIABLE _md_docs OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET)
+        if(NOT _md_docs AND DEFINED ENV{USERPROFILE})
+            set(_md_docs "$ENV{USERPROFILE}/Documents")
+        endif()
+        if(_md_docs)
+            file(TO_CMAKE_PATH "${_md_docs}/PathApps" _md_prefix)
+            set(CMAKE_INSTALL_PREFIX "${_md_prefix}" CACHE PATH "Install location" FORCE)
+        endif()
+    endif()
+    install(TARGETS md RUNTIME DESTINATION .)
+else()
+    install(TARGETS md RUNTIME DESTINATION bin)
 endif()
-install(TARGETS md RUNTIME DESTINATION bin)
 
 # Companion tools, each its own executable.
 option(MD_BUILD_TOOLS "Build the companion tools (pixelart.exe)" ON)

@@ -56,8 +56,10 @@ build\ninja-release\md.exe README.md
 ### Installing
 
 md.exe is self-contained, so installing copies that one file. The default
-location is per user and needs no admin rights:
-`%LOCALAPPDATA%\Programs\md\bin\md.exe` (add that folder to `PATH`).
+location is the current user's `Documents\PathApps\md.exe` (put
+`Documents\PathApps` on `PATH` once and every app installed there runs from
+anywhere). Documents is looked up from Windows, so a OneDrive-redirected
+Documents folder works.
 
 ```bat
 cmake --preset vs2026
