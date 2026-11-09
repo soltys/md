@@ -346,6 +346,10 @@ static const char *const HELP[][2] = {
     {NULL, "Preview"},
     {"Wheel, PgUp / PgDn", "Scroll (the editor follows)"},
     {"Space, Home / End", "Scroll a page, to the start / end"},
+    {"j / k", "Scroll a line down / up (5j: five lines)"},
+    {"Ctrl+d / Ctrl+u", "Half a page down / up"},
+    {"Ctrl+f / Ctrl+b", "A page down / up"},
+    {"gg / G", "Start / end (42G: source line 42)"},
     {"Drag, Shift+click", "Select text"},
     {"Ctrl+A", "Select all"},
     {"Ctrl+C", "Copy the selection"},
@@ -557,19 +561,68 @@ static void editor_text(const char *text)
     nvim_input(&app.nvim, buf);
 }
 
+/* Vim-style keys for the preview: [count]j/k, gg, [count]G, Ctrl+d/u
+ * (half page), Ctrl+f/b (page). Counts are typed as digits first. */
 static void viewer_key(const SDL_KeyboardEvent *k)
 {
     View *v = &app.view;
     const float line = view_line_height(v);
     const float page = SDL_max(v->height - 2 * line, line);
+    const bool ctrl = (k->mod & SDL_KMOD_CTRL) != 0;
+    const bool shift = (k->mod & SDL_KMOD_SHIFT) != 0;
+    const bool alt = (k->mod & SDL_KMOD_ALT) != 0;
+    static int count;          /* pending [count] */
+    static Uint64 g_pressed;   /* time of a first 'g', for "gg" */
+
+    if (!ctrl && !alt && !shift && k->key >= SDLK_0 && k->key <= SDLK_9 &&
+        (count > 0 || k->key != SDLK_0)) {
+        count = SDL_min(count * 10 + (int)(k->key - SDLK_0), 1000000);
+        return;
+    }
+    const int n = count > 0 ? count : 1;
+    const bool had_count = count > 0;
+    count = 0;
+    if (k->key != SDLK_G || shift || ctrl) g_pressed = 0;
+
     switch (k->key) {
     case SDLK_UP:       view_scroll_by(v, -line); break;
     case SDLK_DOWN:     view_scroll_by(v, line); break;
     case SDLK_PAGEUP:   view_scroll_by(v, -page); break;
     case SDLK_PAGEDOWN: view_scroll_by(v, page); break;
-    case SDLK_SPACE:    view_scroll_by(v, (k->mod & SDL_KMOD_SHIFT) ? -page : page); break;
+    case SDLK_SPACE:    view_scroll_by(v, shift ? -page : page); break;
     case SDLK_HOME:     view_scroll_to(v, 0); break;
     case SDLK_END:      view_scroll_to_end(v); break;
+    case SDLK_J:
+        if (ctrl || alt) return;
+        view_scroll_by(v, (float)n * line);
+        break;
+    case SDLK_K:
+        if (ctrl || alt) return;
+        view_scroll_by(v, -(float)n * line);
+        break;
+    case SDLK_D: case SDLK_U:
+        if (!ctrl || shift || alt) return;
+        view_scroll_by(v, (k->key == SDLK_D ? 1.0f : -1.0f) * (float)n * SDL_floorf(v->height * 0.5f));
+        break;
+    case SDLK_F: case SDLK_B:
+        if (!ctrl || shift || alt) return;
+        view_scroll_by(v, (k->key == SDLK_F ? 1.0f : -1.0f) * (float)n * page);
+        break;
+    case SDLK_G:
+        if (ctrl || alt) return;
+        if (shift) { /* G: end, or [count]G: that source line */
+            if (had_count) view_scroll_to_line(v, n);
+            else view_scroll_to_end(v);
+        } else if (g_pressed && SDL_GetTicks() - g_pressed < 1000) {
+            g_pressed = 0; /* gg: start, or [count]gg: that source line */
+            if (had_count) view_scroll_to_line(v, n);
+            else view_scroll_to(v, 0);
+        } else {
+            g_pressed = SDL_GetTicks();
+            if (had_count) count = n; /* keep it for the second g */
+            return;
+        }
+        break;
     default:            return;
     }
     app.viewer_scrolled = true;

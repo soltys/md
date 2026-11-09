@@ -85,6 +85,7 @@ open it in md to try it out.
 | Ctrl+A / Ctrl+C | Select all / copy the selection, when the preview has focus |
 | Click a link | Open it (drag over a link to select its text instead) |
 | PgUp / PgDn / Space / Home / End, wheel | Scroll the preview (the editor follows) |
+| j / k, Ctrl+d / Ctrl+u, Ctrl+f / Ctrl+b, gg / G | Vim-style scrolling in the preview; counts work (5j, 42G = source line 42) |
 
 App shortcuts use Ctrl+Shift so they never clash with AltGr letters on Polish
 and other keyboards (AltGr is Ctrl+Alt on Windows) or with Neovim's own keys.
