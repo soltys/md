@@ -630,28 +630,69 @@ static void set_hand_cursor(bool hand)
 
 /* Web links go to the browser; links to local Markdown files open in md
  * (in the editor when it runs); other local files use the OS handler. */
+static int hex_digit(char c)
+{
+    if (c >= '0' && c <= '9') return c - '0';
+    if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+    if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+    return -1;
+}
+
+/* In place: "My%20Notes.md" -> "My Notes.md". */
+static void percent_decode(char *s)
+{
+    char *w = s;
+    for (const char *r = s; *r; ++r) {
+        int hi, lo;
+        if (r[0] == '%' && (hi = hex_digit(r[1])) >= 0 && (lo = hex_digit(r[2])) >= 0) {
+            *w++ = (char)(hi * 16 + lo);
+            r += 2;
+        } else {
+            *w++ = *r;
+        }
+    }
+    *w = 0;
+}
+
+static bool is_markdown_path(const char *path)
+{
+    static const char *const exts[] = {".md", ".markdown", ".mdown", ".mkd", ".mkdn"};
+    size_t n = SDL_strlen(path);
+    for (size_t i = 0; i < SDL_arraysize(exts); ++i) {
+        size_t e = SDL_strlen(exts[i]);
+        if (n > e && SDL_strcasecmp(path + n - e, exts[i]) == 0) return true;
+    }
+    return false;
+}
+
 static void open_link(const char *url, size_t len)
 {
     char *u = SDL_strndup(url, len);
     if (u[0] == '#') { SDL_free(u); return; } /* in-page anchors: not yet */
-    if (SDL_strstr(u, "://") || SDL_strncasecmp(u, "mailto:", 7) == 0) {
+    char *local = u;
+    if (SDL_strncasecmp(u, "file://", 7) == 0) {
+        /* file:///C:/x.md and file:///home/x.md: local files like any other. */
+        local = u + 7;
+        if (local[0] == '/' && local[1] && local[2] == ':') ++local;
+    } else if (SDL_strstr(u, "://") || SDL_strncasecmp(u, "mailto:", 7) == 0) {
         SDL_OpenURL(u);
         SDL_free(u);
         return;
     }
-    char *hash = SDL_strchr(u, '#');
-    if (hash) *hash = 0;
+    char *query = SDL_strpbrk(local, "#?");
+    if (query) *query = 0;
+    percent_decode(local);
+    if (!local[0]) { SDL_free(u); return; }
+
     const char *doc_path = app.view.doc ? app.view.doc->path : NULL;
+    if ((!doc_path || !doc_path[0]) && app.start_file) doc_path = app.start_file;
     char *path = NULL;
-    bool absolute = u[0] == '/' || u[0] == '\\' || (u[0] && u[1] == ':');
+    bool absolute = local[0] == '/' || local[0] == '\\' || (local[0] && local[1] == ':');
     const char *slash = NULL;
     if (doc_path) for (const char *q = doc_path; *q; ++q) if (*q == '/' || *q == '\\') slash = q;
-    if (absolute || !slash) path = SDL_strdup(u);
-    else SDL_asprintf(&path, "%.*s/%s", (int)(slash - doc_path), doc_path, u);
-    size_t n = SDL_strlen(path);
-    bool markdown = (n > 3 && SDL_strcasecmp(path + n - 3, ".md") == 0) ||
-                    (n > 9 && SDL_strcasecmp(path + n - 9, ".markdown") == 0);
-    if (markdown) {
+    if (absolute || !slash) path = SDL_strdup(local);
+    else SDL_asprintf(&path, "%.*s/%s", (int)(slash - doc_path), doc_path, local);
+    if (is_markdown_path(path)) {
         open_file(path);
     } else {
         char *file_url = NULL;
