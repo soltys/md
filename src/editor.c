@@ -1,5 +1,6 @@
 #include "editor.h"
 #include "fonts.h"
+#include "emoji.h"
 
 #define EDITOR_PX 14.0f
 
@@ -98,7 +99,16 @@ static void add_run(Editor *ed, EdRow *row, const char *s, size_t n, int hl, flo
     uint32_t fg, bg, sp;
     hl_colors(ed->nv, hl, &fg, &bg, &sp);
     SDL_Color c = rgb(fg);
-    TTF_Text *t = TTF_CreateText(ed->engine, hl_font(ed, hl), s, n);
+    /* Emoji clusters (ZWJ sequences, flags, skin tones) are shaped by the
+     * emoji font as a whole rather than split by font fallback. */
+    TTF_Font *font = hl_font(ed, hl);
+    if ((unsigned char)s[0] >= 0x80 && emoji_cluster(s, n) == n) {
+        uint32_t cp;
+        utf8_decode(s, n, &cp);
+        TTF_Font *ef = fonts_get_emoji(ed->px);
+        if (ef && TTF_FontHasGlyph(ef, cp)) font = ef;
+    }
+    TTF_Text *t = TTF_CreateText(ed->engine, font, s, n);
     if (!t) return;
     TTF_SetTextColor(t, c.r, c.g, c.b, 0xFF);
     if (row->count == row->cap) {

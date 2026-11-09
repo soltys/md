@@ -17,6 +17,7 @@
 #include "document.h"
 #include "editor.h"
 #include "fonts.h"
+#include "images.h"
 #include "nvim.h"
 #include "theme.h"
 #include "view.h"
@@ -411,7 +412,7 @@ static void viewer_key(const SDL_KeyboardEvent *k)
     case SDLK_PAGEDOWN: view_scroll_by(v, page); break;
     case SDLK_SPACE:    view_scroll_by(v, (k->mod & SDL_KMOD_SHIFT) ? -page : page); break;
     case SDLK_HOME:     view_scroll_to(v, 0); break;
-    case SDLK_END:      view_scroll_to(v, v->content_height); break;
+    case SDLK_END:      view_scroll_to_end(v); break;
     default:            return;
     }
     app.dirty = true;
@@ -495,6 +496,54 @@ static void editor_mouse(const char *button, const char *action, float x, float 
     nvim_input_mouse(&app.nvim, button, action, mouse_mods(), row, col);
 }
 
+static void set_hand_cursor(bool hand)
+{
+    static SDL_Cursor *pointer, *arrow;
+    static bool current;
+    if (hand == current) return;
+    if (!pointer) {
+        pointer = SDL_CreateSystemCursor(SDL_SYSTEM_CURSOR_POINTER);
+        arrow = SDL_CreateSystemCursor(SDL_SYSTEM_CURSOR_DEFAULT);
+    }
+    SDL_SetCursor(hand ? pointer : arrow);
+    current = hand;
+}
+
+/* Web links go to the browser; links to local Markdown files open in md
+ * (in the editor when it runs); other local files use the OS handler. */
+static void open_link(const char *url, size_t len)
+{
+    char *u = SDL_strndup(url, len);
+    if (u[0] == '#') { SDL_free(u); return; } /* in-page anchors: not yet */
+    if (SDL_strstr(u, "://") || SDL_strncasecmp(u, "mailto:", 7) == 0) {
+        SDL_OpenURL(u);
+        SDL_free(u);
+        return;
+    }
+    char *hash = SDL_strchr(u, '#');
+    if (hash) *hash = 0;
+    const char *doc_path = app.view.doc ? app.view.doc->path : NULL;
+    char *path = NULL;
+    bool absolute = u[0] == '/' || u[0] == '\\' || (u[0] && u[1] == ':');
+    const char *slash = NULL;
+    if (doc_path) for (const char *q = doc_path; *q; ++q) if (*q == '/' || *q == '\\') slash = q;
+    if (absolute || !slash) path = SDL_strdup(u);
+    else SDL_asprintf(&path, "%.*s/%s", (int)(slash - doc_path), doc_path, u);
+    size_t n = SDL_strlen(path);
+    bool markdown = (n > 3 && SDL_strcasecmp(path + n - 3, ".md") == 0) ||
+                    (n > 9 && SDL_strcasecmp(path + n - 9, ".markdown") == 0);
+    if (markdown) {
+        open_file(path);
+    } else {
+        char *file_url = NULL;
+        SDL_asprintf(&file_url, "file:///%s", path[0] == '/' ? path + 1 : path);
+        SDL_OpenURL(file_url);
+        SDL_free(file_url);
+    }
+    SDL_free(path);
+    SDL_free(u);
+}
+
 /* Returns false when the app should quit. */
 static bool handle_event(const SDL_Event *e)
 {
@@ -533,6 +582,15 @@ static bool handle_event(const SDL_Event *e)
         float x = e->button.x, y = e->button.y;
         to_pixels(&x, &y);
         bool down = e->type == SDL_EVENT_MOUSE_BUTTON_DOWN;
+        if (down && e->button.button == SDL_BUTTON_LEFT && viewer_visible() &&
+            in_rect(&app.viewer_rect, x, y)) {
+            const char *url;
+            size_t len;
+            if (view_link_at(&app.view, x - app.viewer_rect.x, y - app.viewer_rect.y, &url, &len)) {
+                open_link(url, len);
+                break;
+            }
+        }
         if (down) {
             Pane target = editor_visible() && in_rect(&app.editor_rect, x, y) ? PANE_EDITOR : PANE_VIEWER;
             if (target != app.focus) {
@@ -550,6 +608,15 @@ static bool handle_event(const SDL_Event *e)
         break;
     }
     case SDL_EVENT_MOUSE_MOTION:
+        if (viewer_visible()) {
+            float x = e->motion.x, y = e->motion.y;
+            to_pixels(&x, &y);
+            const char *url;
+            size_t len;
+            bool link = in_rect(&app.viewer_rect, x, y) &&
+                        view_link_at(&app.view, x - app.viewer_rect.x, y - app.viewer_rect.y, &url, &len);
+            set_hand_cursor(link);
+        }
         if (app.mouse_down_editor && (e->motion.state & SDL_BUTTON_LMASK)) {
             float x = e->motion.x, y = e->motion.y;
             to_pixels(&x, &y);
@@ -587,6 +654,10 @@ static bool handle_event(const SDL_Event *e)
             }
             take_loaded_document();
             pump_nvim();
+            if (app.fonts_ok && images_pump(app.renderer)) {
+                view_relayout(&app.view);
+                app.dirty = true;
+            }
             if (app.nvim_ok && nvim_has_exited(&app.nvim)) return false;
         }
         break;
@@ -612,6 +683,7 @@ int main(int argc, char **argv)
         return 1;
     }
     app.wake_event = SDL_RegisterEvents(1);
+    images_init(app.wake_event);
     app.dark = SDL_GetSystemTheme() == SDL_SYSTEM_THEME_DARK;
     app.layout = LAYOUT_SPLIT;
     app.vertical = true;
@@ -661,7 +733,16 @@ int main(int argc, char **argv)
     bool running = true;
     while (running) {
         SDL_Event e;
-        if (!SDL_WaitEvent(&e)) break;
+        if (app.fonts_ok && view_layout_pending(&app.view)) {
+            /* Lay out the rest of a long document while idle, in small
+             * slices so input stays responsive. */
+            if (!SDL_PollEvent(&e)) {
+                view_layout_more(&app.view, 4);
+                continue;
+            }
+        } else if (!SDL_WaitEvent(&e)) {
+            break;
+        }
         do {
             running = handle_event(&e);
         } while (running && SDL_PollEvent(&e));
@@ -674,6 +755,7 @@ int main(int argc, char **argv)
     document_free(SDL_SetAtomicPointer(&app.loaded_doc, NULL));
     SDL_free(app.preview_pending_name);
     SDL_free(app.preview_pending_text);
+    images_shutdown();
     if (app.engine) TTF_DestroyRendererTextEngine(app.engine);
     if (app.fonts_ok) fonts_shutdown();
     SDL_DestroyRenderer(app.renderer);

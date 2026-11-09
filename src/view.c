@@ -1,4 +1,5 @@
 #include "view.h"
+#include "emoji.h"
 #include "fonts.h"
 
 #define BODY_PX       16.0f
@@ -6,6 +7,10 @@
 #define MARGIN        32.0f
 #define LIST_INDENT   26.0f
 #define QUOTE_INDENT  18.0f
+#define CODE_PAD      14.0f
+#define CELL_PAD_X    12.0f
+#define CELL_PAD_Y    7.0f
+#define LINE_FACTOR   1.45f
 
 static const float heading_scale[7] = {1.0f, 2.0f, 1.5f, 1.25f, 1.0f, 0.875f, 0.85f};
 
@@ -14,44 +19,577 @@ static void set_color(SDL_Renderer *r, SDL_Color c)
     SDL_SetRenderDrawColor(r, c.r, c.g, c.b, c.a);
 }
 
-static void text_color(TTF_Text *t, SDL_Color c)
+static bool is_boxed(const Block *b)
 {
-    if (t) TTF_SetTextColor(t, c.r, c.g, c.b, c.a);
+    return b->kind == BLOCK_CODE || b->kind == BLOCK_HTML || b->kind == BLOCK_TABLE;
 }
 
-static FontFace block_face(const Block *b)
+/* ------------------------------------------------------------ layout -- */
+
+typedef struct TextStyle {
+    FontFace face;            /* base face (FONT_REGULAR, FONT_BOLD for headings, FONT_MONO for code) */
+    float px;
+    SDL_Color color;
+    bool pre;                 /* keep whitespace, break only at newlines */
+    float line_factor;
+} TextStyle;
+
+typedef struct Tok {
+    uint32_t start, len;      /* relative to text */
+    TTF_Font *font;
+    uint16_t style;
+    uint8_t color_class;
+    uint8_t kind;             /* TOK_* */
+    uint32_t url, url_len;
+    Image *img;
+    float w, h, ascent, lineskip;
+} Tok;
+
+enum { TOK_WORD, TOK_SPACE, TOK_NEWLINE, TOK_IMAGE };
+
+static Tok *toks;
+static int tok_count, tok_cap;
+
+static FontFace styled_face(FontFace base, uint16_t style)
 {
-    switch (b->kind) {
-    case BLOCK_HEADING: return FONT_BOLD;
-    case BLOCK_CODE:
-    case BLOCK_TABLE:
-    case BLOCK_HTML:    return FONT_MONO;
-    default:            return FONT_REGULAR;
+    if (style & ST_CODE) return FONT_MONO;
+    bool bold = (style & ST_BOLD) || base == FONT_BOLD || base == FONT_BOLD_ITALIC;
+    bool italic = (style & ST_ITALIC) || base == FONT_ITALIC || base == FONT_BOLD_ITALIC;
+    if (base == FONT_MONO || base == FONT_MONO_ITALIC || base == FONT_MONO_BOLD ||
+        base == FONT_MONO_BOLD_ITALIC) {
+        return bold ? (italic ? FONT_MONO_BOLD_ITALIC : FONT_MONO_BOLD)
+                    : (italic ? FONT_MONO_ITALIC : FONT_MONO);
+    }
+    return bold ? (italic ? FONT_BOLD_ITALIC : FONT_BOLD) : (italic ? FONT_ITALIC : base);
+}
+
+static void push_tok(const Tok *t)
+{
+    if (tok_count == tok_cap) {
+        tok_cap = tok_cap ? tok_cap * 2 : 1024;
+        toks = SDL_realloc(toks, sizeof(Tok) * (size_t)tok_cap);
+    }
+    toks[tok_count++] = *t;
+}
+
+static void measure(Tok *t, const char *text)
+{
+    int w = 0, h = 0;
+    if (t->len) TTF_GetStringSize(t->font, text + t->start, t->len, &w, &h);
+    t->w = (float)w;
+    t->ascent = (float)TTF_GetFontAscent(t->font);
+    t->lineskip = (float)TTF_GetFontLineSkip(t->font);
+    t->h = t->lineskip;
+}
+
+/* Splits a styled segment [a, b) into tokens. */
+static void tokenize(View *v, const char *text, uint32_t a, uint32_t b, const Span *sp,
+                     const TextStyle *ts, const char *doc_path)
+{
+    uint16_t style = sp ? sp->style : 0;
+    float px = ts->px * ((style & ST_CODE) && !ts->pre ? 0.875f : 1.0f);
+    TTF_Font *font = fonts_get(styled_face(ts->face, style), px);
+    TTF_Font *emoji_font = fonts_get_emoji(px);
+
+    Tok base;
+    SDL_zero(base);
+    base.style = style;
+    base.color_class = sp ? sp->color : 0;
+    base.url = sp ? sp->url : 0;
+    base.url_len = sp ? sp->url_len : 0;
+
+    if ((style & ST_IMAGE) && sp && sp->url_len) {
+        Image *img = images_get(doc_path, document_str(v->doc, sp->url), sp->url_len);
+        if (img->state == IMAGE_READY) {
+            Tok t = base;
+            t.kind = TOK_IMAGE;
+            t.start = a;
+            t.len = b - a;
+            t.img = img;
+            t.font = font;
+            t.w = (float)img->w * v->scale;
+            t.h = (float)img->h * v->scale;
+            t.ascent = t.h;
+            t.lineskip = t.h;
+            push_tok(&t);
+            return;
+        }
+        /* Loading or failed: show the alt text. */
+        base.style = (uint16_t)((style & ~ST_IMAGE) | ST_ITALIC);
+        font = fonts_get(styled_face(ts->face, base.style), px);
+        base.img = img;
+    }
+
+    uint32_t i = a;
+    while (i < b) {
+        Tok t = base;
+        t.start = i;
+        t.font = font;
+        char c = text[i];
+        if (c == '\n') {
+            t.kind = TOK_NEWLINE;
+            t.len = 1;
+            t.font = font;
+            t.w = 0;
+            t.ascent = (float)TTF_GetFontAscent(font);
+            t.lineskip = (float)TTF_GetFontLineSkip(font);
+            t.h = t.lineskip;
+            push_tok(&t);
+            i++;
+            continue;
+        }
+        size_t em = emoji_cluster(text + i, b - i);
+        if (em) {
+            uint32_t cp;
+            utf8_decode(text + i, b - i, &cp);
+            if (emoji_font && TTF_FontHasGlyph(emoji_font, cp)) {
+                t.kind = TOK_WORD;
+                t.len = (uint32_t)em;
+                t.font = emoji_font;
+                measure(&t, text);
+                push_tok(&t);
+                i += (uint32_t)em;
+                continue;
+            }
+        }
+        if (!ts->pre && (c == ' ' || c == '\t')) {
+            uint32_t j = i;
+            while (j < b && (text[j] == ' ' || text[j] == '\t')) j++;
+            t.kind = TOK_SPACE;
+            t.len = j - i;
+            measure(&t, text);
+            push_tok(&t);
+            i = j;
+            continue;
+        }
+        /* Word: up to whitespace, newline or an emoji. In pre mode spaces
+         * belong to the word. */
+        uint32_t j = i;
+        while (j < b) {
+            char d = text[j];
+            if (d == '\n') break;
+            if (!ts->pre && (d == ' ' || d == '\t')) break;
+            if ((unsigned char)d >= 0x80 && j > i && emoji_cluster(text + j, b - j)) break;
+            j++;
+        }
+        if (j == i) j = i + 1;
+        t.kind = TOK_WORD;
+        t.len = j - i;
+        measure(&t, text);
+        push_tok(&t);
+        i = j;
     }
 }
 
-static float block_px(const View *v, const Block *b)
+static SDL_Color tok_color(View *v, const Tok *t, const TextStyle *ts)
 {
-    float base = BODY_PX * v->scale;
-    switch (b->kind) {
-    case BLOCK_HEADING: return base * heading_scale[b->level <= 6 ? b->level : 6];
-    case BLOCK_CODE:
-    case BLOCK_TABLE:
-    case BLOCK_HTML:    return base * 0.875f;
-    default:            return base;
+    if (t->color_class && t->color_class < HL_COUNT) return v->theme.syntax[t->color_class];
+    if (t->style & ST_LINK) return v->theme.accent;
+    if (t->img) return v->theme.muted;
+    return ts->color;
+}
+
+static void push_frag(View *v, const Frag *f)
+{
+    if (v->frag_count == v->frag_cap) {
+        v->frag_cap = v->frag_cap ? v->frag_cap * 2 : 4096;
+        v->frags = SDL_realloc(v->frags, sizeof(Frag) * (size_t)v->frag_cap);
     }
+    v->frags[v->frag_count++] = *f;
+}
+
+/* Lays out styled text into `width`. With out == NULL only measures and
+ * returns the widest line (used for table column widths). */
+static float layout_text(View *v, Para *out, uint32_t text_off, uint32_t len,
+                         const Span *spans, uint32_t span_count, float width,
+                         const TextStyle *ts)
+{
+    const char *text = v->doc->strings + text_off;
+    const char *doc_path = v->doc->path;
+    tok_count = 0;
+
+    /* Segments: gaps between spans use the default style. */
+    uint32_t pos = 0;
+    for (uint32_t i = 0; i < span_count; ++i) {
+        const Span *sp = &spans[i];
+        if (sp->len == 0) continue;
+        if (sp->start > pos) tokenize(v, text, pos, sp->start, NULL, ts, doc_path);
+        tokenize(v, text, sp->start, sp->start + sp->len, sp, ts, doc_path);
+        pos = sp->start + sp->len;
+    }
+    if (pos < len) tokenize(v, text, pos, len, NULL, ts, doc_path);
+
+    if (out) {
+        out->first = v->frag_count;
+        out->count = 0;
+        out->w = out->h = 0;
+    }
+
+    float max_w = 0;
+    float y = 0;
+    int i = 0;
+    if (tok_count == 0 && out) {
+        TTF_Font *f = fonts_get(ts->face, ts->px);
+        out->h = SDL_roundf((float)TTF_GetFontLineSkip(f) * ts->line_factor);
+        return 0;
+    }
+    while (i < tok_count) {
+        /* Collect one line: tokens [i, end). */
+        float x = 0;
+        int end = i;
+        while (end < tok_count && toks[end].kind == TOK_SPACE && !ts->pre) end++; /* skip leading spaces */
+        int line_start = end;
+        int last_break = -1;
+        while (end < tok_count) {
+            Tok *t = &toks[end];
+            if (t->kind == TOK_NEWLINE) break;
+            if (t->kind == TOK_SPACE) last_break = end;
+            if (!ts->pre && x + t->w > width && end > line_start && t->kind != TOK_SPACE) {
+                /* wrap: at the last space if there is one on this line */
+                if (last_break > line_start) end = last_break;
+                break;
+            }
+            x += t->w;
+            end++;
+        }
+        /* Metrics of the line. */
+        float asc = 0, skip = 0;
+        for (int k = line_start; k < end; ++k) {
+            if (toks[k].kind == TOK_IMAGE) {
+                asc = SDL_max(asc, toks[k].h);
+                skip = SDL_max(skip, toks[k].h);
+            } else {
+                asc = SDL_max(asc, toks[k].ascent);
+                skip = SDL_max(skip, toks[k].lineskip);
+            }
+        }
+        if (skip == 0) { /* empty line */
+            Tok *t = &toks[SDL_min(end, tok_count - 1)];
+            asc = t->ascent;
+            skip = t->lineskip;
+        }
+        bool has_image = false;
+        for (int k = line_start; k < end; ++k) if (toks[k].kind == TOK_IMAGE) has_image = true;
+        float line_h = has_image ? skip : SDL_roundf(skip * ts->line_factor);
+        float base = has_image ? asc : SDL_roundf((line_h - skip) * 0.5f + asc);
+
+        /* Place fragments. */
+        x = 0;
+        Frag *cur = NULL;
+        for (int k = line_start; k < end; ++k) {
+            Tok *t = &toks[k];
+            if (out) {
+                float ty = y + base - (t->kind == TOK_IMAGE ? t->h : t->ascent);
+                SDL_Color c = tok_color(v, t, ts);
+                bool mergeable = cur && t->kind != TOK_IMAGE && !cur->img &&
+                                 cur->font == t->font && cur->style == t->style &&
+                                 cur->url == t->url && cur->str + cur->len == text_off + t->start &&
+                                 SDL_memcmp(&cur->color, &c, sizeof(c)) == 0;
+                if (mergeable) {
+                    cur->len += t->len;
+                    cur->w = x + t->w - cur->x;
+                } else if (!(t->kind == TOK_SPACE && !(t->style & (ST_CODE | ST_LINK | ST_STRIKE)))) {
+                    Frag f;
+                    SDL_zero(f);
+                    f.x = x;
+                    f.y = ty;
+                    f.w = t->w;
+                    f.h = t->kind == TOK_IMAGE ? t->h : t->lineskip;
+                    f.str = text_off + t->start;
+                    f.len = t->len;
+                    f.font = t->font;
+                    f.color = c;
+                    f.style = t->style;
+                    f.url = t->url;
+                    f.url_len = t->url_len;
+                    f.img = t->kind == TOK_IMAGE ? t->img : NULL;
+                    push_frag(v, &f);
+                    cur = &v->frags[v->frag_count - 1];
+                } else {
+                    cur = NULL; /* plain spaces are not drawn */
+                }
+            }
+            x += t->w;
+        }
+        /* Do not count trailing spaces in the width. */
+        float w = x;
+        for (int k = end - 1; k >= line_start && toks[k].kind == TOK_SPACE; --k) w -= toks[k].w;
+        max_w = SDL_max(max_w, w);
+        y += line_h;
+
+        i = end;
+        if (i < tok_count && toks[i].kind == TOK_NEWLINE) i++;
+        else if (i < tok_count && toks[i].kind == TOK_SPACE) i++;
+    }
+    if (out) {
+        out->count = v->frag_count - out->first;
+        out->w = max_w;
+        out->h = y;
+    }
+    return max_w;
+}
+
+static Para layout_para(View *v, uint32_t text, uint32_t len, uint32_t span_first,
+                        uint32_t span_count, float width, const TextStyle *ts)
+{
+    Para p;
+    SDL_zero(p);
+    layout_text(v, &p, text, len, v->doc->spans + span_first, span_count, width, ts);
+    return p;
+}
+
+static TextStyle body_style(const View *v, const Block *b)
+{
+    TextStyle ts;
+    ts.face = FONT_REGULAR;
+    ts.px = BODY_PX * v->scale;
+    ts.color = b->quote_depth ? v->theme.muted : v->theme.text;
+    ts.pre = false;
+    ts.line_factor = LINE_FACTOR;
+    if (b->kind == BLOCK_HEADING) {
+        ts.face = b->level <= 4 ? FONT_BOLD : FONT_MEDIUM;
+        ts.px = BODY_PX * v->scale * heading_scale[b->level <= 6 ? b->level : 6];
+        ts.color = v->theme.heading;
+        ts.line_factor = 1.25f;
+    } else if (b->kind == BLOCK_CODE || b->kind == BLOCK_HTML) {
+        ts.face = FONT_MONO;
+        ts.px = BODY_PX * 0.875f * v->scale;
+        ts.color = v->theme.code_text;
+        ts.pre = true;
+        ts.line_factor = 1.35f;
+    }
+    return ts;
+}
+
+static void layout_table(View *v, ViewItem *it, float width)
+{
+    const Block *b = it->block;
+    const Document *doc = v->doc;
+    const float s = v->scale;
+    int cols = b->cols, rows = b->rows;
+    if (cols == 0 || rows == 0) { it->h = 0; return; }
+
+    SDL_free(it->cells);
+    SDL_free(it->col_w);
+    SDL_free(it->row_h);
+    it->cells = SDL_calloc(b->cell_count ? b->cell_count : 1, sizeof(ViewCell));
+    it->col_w = SDL_calloc((size_t)cols, sizeof(float));
+    it->row_h = SDL_calloc((size_t)rows, sizeof(float));
+    float *natural = SDL_calloc((size_t)cols, sizeof(float));
+
+    TextStyle ts = body_style(v, b);
+    TextStyle hs = ts;
+    hs.face = FONT_BOLD;
+    ts.line_factor = hs.line_factor = 1.3f;
+    const float pad_x = CELL_PAD_X * s, pad_y = CELL_PAD_Y * s;
+
+    for (uint32_t i = 0; i < b->cell_count; ++i) {
+        const TableCell *c = &doc->cells[b->cell_first + i];
+        float w = layout_text(v, NULL, c->text, c->text_len, doc->spans + c->span_first,
+                              c->span_count, 1e9f, c->row == 0 ? &hs : &ts);
+        natural[c->col] = SDL_max(natural[c->col], w + 2 * pad_x);
+    }
+    float total = 0;
+    for (int c = 0; c < cols; ++c) {
+        natural[c] = SDL_max(natural[c], 3 * pad_x);
+        total += natural[c];
+    }
+    for (int c = 0; c < cols; ++c) {
+        it->col_w[c] = total <= width ? natural[c] : SDL_floorf(natural[c] * width / total);
+        it->col_w[c] = SDL_max(it->col_w[c], 2 * pad_x + 8 * s);
+    }
+
+    for (uint32_t i = 0; i < b->cell_count; ++i) {
+        const TableCell *c = &doc->cells[b->cell_first + i];
+        ViewCell *vc = &it->cells[i];
+        vc->para = layout_para(v, c->text, c->text_len, c->span_first, c->span_count,
+                               it->col_w[c->col] - 2 * pad_x, c->row == 0 ? &hs : &ts);
+        it->row_h[c->row] = SDL_max(it->row_h[c->row], vc->para.h + 2 * pad_y);
+    }
+    float y = 0;
+    float *row_y = SDL_calloc((size_t)rows, sizeof(float));
+    for (int r = 0; r < rows; ++r) {
+        if (it->row_h[r] == 0) it->row_h[r] = 2 * pad_y + BODY_PX * s;
+        row_y[r] = y;
+        y += it->row_h[r];
+    }
+    for (uint32_t i = 0; i < b->cell_count; ++i) {
+        const TableCell *c = &doc->cells[b->cell_first + i];
+        ViewCell *vc = &it->cells[i];
+        float x = 0;
+        for (int k = 0; k < c->col && k < cols; ++k) x += it->col_w[k];
+        float inner = it->col_w[c->col] - 2 * pad_x;
+        int align = table_align(b, c->col);
+        float dx = align == ALIGN_RIGHT ? inner - vc->para.w : align == ALIGN_CENTER ? (inner - vc->para.w) * 0.5f : 0;
+        vc->x = x + pad_x + SDL_max(0.0f, SDL_floorf(dx));
+        vc->y = row_y[c->row] + pad_y;
+    }
+    float tw = 0;
+    for (int c = 0; c < cols; ++c) tw += it->col_w[c];
+    it->w = tw;
+    it->h = y;
+    SDL_free(row_y);
+    SDL_free(natural);
+}
+
+static float content_x0(const View *v, float *content_w)
+{
+    const float s = v->scale;
+    float cw = SDL_min(MAX_WIDTH * s, v->width - 2 * MARGIN * s);
+    if (cw < 100 * s) cw = SDL_max(v->width - 16 * s, 50.0f);
+    *content_w = cw;
+    return SDL_floorf((v->width - cw) * 0.5f);
+}
+
+static void layout_item(View *v, int idx)
+{
+    ViewItem *it = &v->items[idx];
+    const Block *b = it->block;
+    const Document *doc = v->doc;
+    const float s = v->scale;
+    float content_w;
+    const float x0 = content_x0(v, &content_w);
+    float y = v->next_y;
+
+    float indent = b->list_depth * LIST_INDENT * s + b->quote_depth * QUOTE_INDENT * s;
+    float x = x0 + indent;
+    float w = content_w - indent;
+    if (b->kind == BLOCK_CODE || b->kind == BLOCK_HTML) {
+        x += CODE_PAD * s;
+        w -= 2 * CODE_PAD * s;
+    }
+    if (idx > 0 && b->kind == BLOCK_HEADING) y += 10 * s;
+
+    TextStyle ts = body_style(v, b);
+    it->para.count = it->marker.count = it->lang.count = 0;
+
+    if (b->marker_len && b->task == TASK_NONE) {
+        TextStyle ms = body_style(v, b);
+        ms.color = v->theme.muted;
+        if (b->kind != BLOCK_PARAGRAPH) { ms.face = FONT_REGULAR; ms.px = BODY_PX * s; }
+        it->marker = layout_para(v, b->marker, b->marker_len, 0, 0, 1e9f, &ms);
+    }
+    if (b->lang_len) {
+        TextStyle ls = {FONT_MEDIUM, BODY_PX * 0.75f * s, v->theme.muted, false, 1.0f};
+        it->lang = layout_para(v, b->lang, b->lang_len, 0, 0, 1e9f, &ls);
+    }
+
+    float text_x = x, text_w = w;
+    if (b->task != TASK_NONE) {
+        text_x += 22 * s;
+        text_w -= 22 * s;
+    }
+
+    it->x = text_x;
+    it->w = text_w;
+
+    switch (b->kind) {
+    case BLOCK_RULE:
+        y += 8 * s;
+        it->y = y;
+        it->h = SDL_max(2 * s, 1.0f);
+        y += it->h + 24 * s;
+        break;
+    case BLOCK_CODE:
+    case BLOCK_HTML: {
+        it->para = layout_para(v, b->text, b->text_len, b->span_first, b->span_count, 1e9f, &ts);
+        float label_h = it->lang.count ? it->lang.h + 4 * s : 0;
+        it->box_y = y;
+        it->y = y + CODE_PAD * s + label_h;
+        it->h = it->para.h;
+        it->box_h = it->h + 2 * CODE_PAD * s + label_h;
+        y += it->box_h + 16 * s;
+        break;
+    }
+    case BLOCK_TABLE:
+        it->x = x;
+        layout_table(v, it, w);
+        it->box_y = y;
+        it->y = y;
+        it->box_h = it->h;
+        y += it->h + 16 * s;
+        break;
+    case BLOCK_HEADING:
+        it->para = layout_para(v, b->text, b->text_len, b->span_first, b->span_count, text_w, &ts);
+        it->y = y;
+        it->h = it->para.h;
+        y += it->h + (b->level <= 2 ? 22 * s : 10 * s);
+        break;
+    default: {
+        it->para = layout_para(v, b->text, b->text_len, b->span_first, b->span_count, text_w, &ts);
+        it->y = y;
+        it->h = SDL_max(it->para.h, it->marker.h);
+        bool tight = b->list_depth > 0 && idx + 1 < v->item_count &&
+                     v->items[idx + 1].block->list_depth > 0;
+        y += it->h + (tight ? 4 * s : 14 * s);
+        break;
+    }
+    }
+    (void)doc;
+    v->next_y = y;
+    v->content_height = y + MARGIN * s;
+}
+
+static void destroy_texts(View *v)
+{
+    for (int i = 0; i < v->frag_count; ++i) {
+        if (v->frags[i].text) TTF_DestroyText(v->frags[i].text);
+    }
+    v->frag_count = 0;
 }
 
 static void free_items(View *v)
 {
+    destroy_texts(v);
     for (int i = 0; i < v->item_count; ++i) {
-        if (v->items[i].text) TTF_DestroyText(v->items[i].text);
-        if (v->items[i].marker) TTF_DestroyText(v->items[i].marker);
-        if (v->items[i].lang) TTF_DestroyText(v->items[i].lang);
+        SDL_free(v->items[i].cells);
+        SDL_free(v->items[i].col_w);
+        SDL_free(v->items[i].row_h);
     }
     SDL_free(v->items);
     v->items = NULL;
     v->item_count = 0;
+    v->laid = 0;
+}
+
+static float item_top(const ViewItem *it)
+{
+    return is_boxed(it->block) ? it->box_y : it->y;
+}
+
+static void layout_until(View *v, int idx, float y_limit)
+{
+    while (v->laid < v->item_count && (v->laid <= idx || v->next_y < y_limit)) {
+        layout_item(v, v->laid++);
+    }
+}
+
+/* Re-lays out from scratch, keeping the first visible block in place. */
+static void relayout_anchored(View *v)
+{
+    int anchor = -1;
+    float offset = 0;
+    for (int i = 0; i < v->laid; ++i) {
+        const ViewItem *it = &v->items[i];
+        float bottom = is_boxed(it->block) ? it->box_y + it->box_h : it->y + it->h;
+        if (bottom > v->scroll) {
+            anchor = i;
+            offset = v->scroll - item_top(it);
+            break;
+        }
+    }
+    destroy_texts(v);
+    v->laid = 0;
+    v->next_y = MARGIN * v->scale;
+    v->content_height = v->next_y;
+    if (anchor >= 0) {
+        layout_until(v, anchor, 0);
+        v->scroll = item_top(&v->items[anchor]) + offset;
+    } else {
+        v->scroll = 0;
+    }
+    layout_until(v, -1, v->scroll + 2 * v->height);
+    view_scroll_by(v, 0);
 }
 
 void view_init(View *v, TTF_TextEngine *engine, const Theme *theme)
@@ -65,6 +603,8 @@ void view_init(View *v, TTF_TextEngine *engine, const Theme *theme)
 void view_destroy(View *v)
 {
     free_items(v);
+    SDL_free(v->frags);
+    v->frags = NULL;
     document_free(v->doc);
     if (v->msg_title) TTF_DestroyText(v->msg_title);
     if (v->msg_body) TTF_DestroyText(v->msg_body);
@@ -78,38 +618,78 @@ void view_set_document(View *v, Document *doc, bool keep_scroll)
     document_free(v->doc);
     v->doc = doc;
     v->scroll = 0;
+    v->next_y = MARGIN * v->scale;
+    v->content_height = v->next_y;
     if (!doc || doc->error) return;
 
     v->items = SDL_calloc((size_t)(doc->block_count ? doc->block_count : 1), sizeof(ViewItem));
     v->item_count = doc->block_count;
-    const Theme *th = &v->theme;
-    for (int i = 0; i < doc->block_count; ++i) {
-        const Block *b = &doc->blocks[i];
-        ViewItem *it = &v->items[i];
-        it->block = b;
-        TTF_Font *font = fonts_get(block_face(b), block_px(v, b));
-        if (b->kind != BLOCK_RULE) {
-            it->text = TTF_CreateText(v->engine, font, document_str(doc, b->text), b->text_len);
-            text_color(it->text, b->kind == BLOCK_HEADING ? th->heading
-                               : b->kind == BLOCK_CODE ? th->code_text
-                               : b->quote_depth ? th->muted : th->text);
-        }
-        if (b->marker_len) {
-            TTF_Font *mf = fonts_get(FONT_REGULAR, BODY_PX * v->scale);
-            it->marker = TTF_CreateText(v->engine, mf, document_str(doc, b->marker), b->marker_len);
-            text_color(it->marker, th->muted);
-        }
-        if (b->lang_len) {
-            TTF_Font *lf = fonts_get(FONT_MEDIUM, BODY_PX * 0.75f * v->scale);
-            it->lang = TTF_CreateText(v->engine, lf, document_str(doc, b->lang), b->lang_len);
-            text_color(it->lang, th->muted);
-        }
+    for (int i = 0; i < doc->block_count; ++i) v->items[i].block = &doc->blocks[i];
+
+    float target = keep_scroll ? old_scroll : 0;
+    layout_until(v, -1, target + 2 * v->height);
+    v->scroll = target;
+    view_scroll_by(v, 0);
+}
+
+void view_layout(View *v, float width, float height, float scale)
+{
+    bool changed = width != v->width || scale != v->scale;
+    v->width = width;
+    v->height = height;
+    if (scale != v->scale) {
+        v->scroll = v->scroll * scale / v->scale;
+        v->scale = scale;
     }
-    /* Force a relayout with the current geometry. */
-    float w = v->width, h = v->height;
-    v->width = 0;
-    view_layout(v, w, h, v->scale);
-    if (keep_scroll) view_scroll_to(v, old_scroll);
+    if (changed && v->doc && !v->doc->error) relayout_anchored(v);
+    else if (v->doc) {
+        layout_until(v, -1, v->scroll + 2 * v->height);
+        view_scroll_by(v, 0);
+    }
+}
+
+void view_relayout(View *v)
+{
+    if (v->doc && !v->doc->error) relayout_anchored(v);
+}
+
+bool view_layout_pending(const View *v)
+{
+    return v->doc && v->laid < v->item_count;
+}
+
+bool view_layout_more(View *v, Uint64 budget_ms)
+{
+    Uint64 start = SDL_GetTicks();
+    while (v->laid < v->item_count) {
+        layout_item(v, v->laid++);
+        if (SDL_GetTicks() - start >= budget_ms) break;
+    }
+    return v->laid < v->item_count;
+}
+
+float view_line_height(const View *v)
+{
+    return BODY_PX * 1.5f * v->scale;
+}
+
+void view_scroll_to(View *v, float y)
+{
+    /* Make sure what is about to be shown is laid out. */
+    layout_until(v, -1, y + 2 * v->height);
+    float max_scroll = SDL_max(0.0f, v->content_height - v->height);
+    v->scroll = SDL_clamp(y, 0.0f, max_scroll);
+}
+
+void view_scroll_by(View *v, float dy)
+{
+    view_scroll_to(v, v->scroll + dy);
+}
+
+void view_scroll_to_end(View *v)
+{
+    layout_until(v, v->item_count, 0);
+    view_scroll_to(v, v->content_height);
 }
 
 void view_scroll_to_line(View *v, int line)
@@ -120,124 +700,49 @@ void view_scroll_to_line(View *v, int line)
         if ((int)v->items[i].block->src_line <= line) best = i;
         else break;
     }
-    const ViewItem *it = &v->items[best];
-    const Block *b = it->block;
-    float y = (b->kind == BLOCK_CODE || b->kind == BLOCK_TABLE || b->kind == BLOCK_HTML) ? it->box_y : it->y;
-    view_scroll_to(v, y - MARGIN * v->scale);
+    layout_until(v, best, 0);
+    view_scroll_to(v, item_top(&v->items[best]) - MARGIN * v->scale);
 }
 
-static void refresh_fonts(View *v)
+/* -------------------------------------------------------------- draw -- */
+
+static void draw_para(View *v, SDL_Renderer *r, const Para *p, float ox, float oy)
 {
-    for (int i = 0; i < v->item_count; ++i) {
-        ViewItem *it = &v->items[i];
-        if (it->text) TTF_SetTextFont(it->text, fonts_get(block_face(it->block), block_px(v, it->block)));
-        if (it->marker) TTF_SetTextFont(it->marker, fonts_get(FONT_REGULAR, BODY_PX * v->scale));
-        if (it->lang) TTF_SetTextFont(it->lang, fonts_get(FONT_MEDIUM, BODY_PX * 0.75f * v->scale));
-    }
-}
-
-void view_layout(View *v, float width, float height, float scale)
-{
-    bool scale_changed = scale != v->scale;
-    bool width_changed = width != v->width;
-    v->height = height;
-    v->width = width;
-    v->scale = scale;
-    if (scale_changed) refresh_fonts(v);
-    if (!scale_changed && !width_changed) {
-        view_scroll_by(v, 0);
-        return;
-    }
-
-    const float s = scale;
-    float content_w = SDL_min(MAX_WIDTH * s, width - 2 * MARGIN * s);
-    if (content_w < 100 * s) content_w = SDL_max(width - 16 * s, 50.0f);
-    const float x0 = SDL_floorf((width - content_w) * 0.5f);
-    const float code_pad = 14 * s;
-
-    float y = MARGIN * s;
-    for (int i = 0; i < v->item_count; ++i) {
-        ViewItem *it = &v->items[i];
-        const Block *b = it->block;
-        bool in_list = b->list_depth > 0;
-        float indent = b->list_depth * LIST_INDENT * s + b->quote_depth * QUOTE_INDENT * s;
-        float x = x0 + indent;
-        float w = content_w - indent;
-
-        /* Spacing before the block. */
-        if (i > 0) {
-            if (b->kind == BLOCK_HEADING) y += 10 * s;
+    const float s = v->scale;
+    for (int i = p->first; i < p->first + p->count; ++i) {
+        Frag *f = &v->frags[i];
+        float x = ox + f->x, y = oy + f->y;
+        if (f->img && f->img->state == IMAGE_READY) {
+            SDL_FRect dst = {x, y, f->w, f->h};
+            SDL_RenderTexture(r, f->img->texture, NULL, &dst);
+            continue;
         }
-
-        if (b->kind == BLOCK_CODE || b->kind == BLOCK_TABLE || b->kind == BLOCK_HTML) {
-            x += code_pad;
-            w -= 2 * code_pad;
+        if (f->style & ST_CODE) {
+            SDL_FRect bg = {x - 3 * s, y, f->w + 6 * s, f->h};
+            set_color(r, v->theme.code_bg);
+            SDL_RenderFillRect(r, &bg);
         }
-
-        int tw = 0, th = 0;
-        if (it->text) {
-            TTF_SetTextWrapWidth(it->text, (int)SDL_max(w, 1.0f));
-            TTF_GetTextSize(it->text, &tw, &th);
+        if (!f->text) {
+            f->text = TTF_CreateText(v->engine, f->font, v->doc->strings + f->str, f->len);
+            if (f->text) TTF_SetTextColor(f->text, f->color.r, f->color.g, f->color.b, f->color.a);
         }
-        if (th == 0 && it->marker) {
-            int mw;
-            TTF_GetTextSize(it->marker, &mw, &th);
+        if (f->text) TTF_DrawRendererText(f->text, x, y);
+        if (f->style & ST_STRIKE) {
+            float asc = (float)TTF_GetFontAscent(f->font);
+            SDL_FRect line = {x, y + asc * 0.68f, f->w, SDL_max(1.0f, SDL_floorf(s))};
+            set_color(r, f->color);
+            SDL_RenderFillRect(r, &line);
         }
-
-        it->x = x;
-        it->w = w;
-        it->h = (float)th;
-
-        switch (b->kind) {
-        case BLOCK_RULE:
-            y += 8 * s;
-            it->y = y;
-            it->h = SDL_max(2 * s, 1.0f);
-            y += it->h + 24 * s;
-            break;
-        case BLOCK_CODE:
-        case BLOCK_TABLE:
-        case BLOCK_HTML: {
-            float label_h = 0;
-            if (it->lang) {
-                int lw, lh;
-                TTF_GetTextSize(it->lang, &lw, &lh);
-                label_h = (float)lh + 4 * s;
-            }
-            it->box_y = y;
-            it->y = y + code_pad + label_h;
-            it->box_h = it->h + 2 * code_pad + label_h;
-            y += it->box_h + 16 * s;
-            break;
-        }
-        case BLOCK_HEADING:
-            it->y = y;
-            y += it->h + (b->level <= 2 ? 24 * s : 12 * s);
-            break;
-        default:
-            it->y = y;
-            y += it->h + (in_list ? 6 * s : 16 * s);
-            break;
+        if (f->style & ST_LINK) {
+            float asc = (float)TTF_GetFontAscent(f->font);
+            SDL_FRect line = {x, y + asc + 2 * s, f->w, SDL_max(1.0f, SDL_floorf(s))};
+            SDL_Color c = f->color;
+            c.a = 0x60;
+            SDL_SetRenderDrawBlendMode(r, SDL_BLENDMODE_BLEND);
+            set_color(r, c);
+            SDL_RenderFillRect(r, &line);
         }
     }
-    v->content_height = y + MARGIN * s;
-    view_scroll_by(v, 0);
-}
-
-float view_line_height(const View *v)
-{
-    return BODY_PX * 1.5f * v->scale;
-}
-
-void view_scroll_to(View *v, float y)
-{
-    float max_scroll = SDL_max(0.0f, v->content_height - v->height);
-    v->scroll = SDL_clamp(y, 0.0f, max_scroll);
-}
-
-void view_scroll_by(View *v, float dy)
-{
-    view_scroll_to(v, v->scroll + dy);
 }
 
 static void draw_checkbox(SDL_Renderer *r, const Theme *th, float x, float y, float size,
@@ -247,17 +752,52 @@ static void draw_checkbox(SDL_Renderer *r, const Theme *th, float x, float y, fl
     if (checked) {
         set_color(r, th->accent);
         SDL_RenderFillRect(r, &box);
-        /* simple check mark */
         set_color(r, th->bg);
         for (float t = 0; t < 1.5f * s; t += 0.5f) {
-            SDL_RenderLine(r, x + size * 0.22f, y + size * 0.52f + t,
-                           x + size * 0.42f, y + size * 0.72f + t);
-            SDL_RenderLine(r, x + size * 0.42f, y + size * 0.72f + t,
-                           x + size * 0.78f, y + size * 0.30f + t);
+            SDL_RenderLine(r, x + size * 0.22f, y + size * 0.52f + t, x + size * 0.42f, y + size * 0.72f + t);
+            SDL_RenderLine(r, x + size * 0.42f, y + size * 0.72f + t, x + size * 0.78f, y + size * 0.30f + t);
         }
     } else {
         set_color(r, th->muted);
         SDL_RenderRect(r, &box);
+    }
+}
+
+static void draw_table(View *v, SDL_Renderer *r, ViewItem *it, float dy)
+{
+    const Block *b = it->block;
+    const Theme *th = &v->theme;
+    const float s = v->scale;
+    float x0 = it->x, y0 = it->y + dy;
+    float line = SDL_max(1.0f, SDL_floorf(s));
+
+    /* Row backgrounds. */
+    float y = y0;
+    for (int row = 0; row < b->rows; ++row) {
+        if (row == 0 || row % 2 == 0) {
+            SDL_FRect bg = {x0, y, it->w, it->row_h[row]};
+            set_color(r, th->code_bg);
+            if (row != 0 || true) SDL_RenderFillRect(r, &bg);
+        }
+        y += it->row_h[row];
+    }
+    /* Grid lines. */
+    set_color(r, th->rule);
+    y = y0;
+    for (int row = 0; row <= b->rows; ++row) {
+        SDL_FRect l = {x0, y, it->w, line};
+        SDL_RenderFillRect(r, &l);
+        if (row < b->rows) y += it->row_h[row];
+    }
+    float x = x0;
+    for (int c = 0; c <= b->cols; ++c) {
+        SDL_FRect l = {x, y0, line, it->h};
+        SDL_RenderFillRect(r, &l);
+        if (c < b->cols) x += it->col_w[c];
+    }
+    for (uint32_t i = 0; i < b->cell_count; ++i) {
+        ViewCell *vc = &it->cells[i];
+        draw_para(v, r, &vc->para, x0 + vc->x, y0 + vc->y);
     }
 }
 
@@ -267,72 +807,106 @@ void view_draw(View *v, SDL_Renderer *r)
     const float s = v->scale;
     const float top = v->scroll;
     const float bottom = v->scroll + v->height;
+    SDL_SetRenderDrawBlendMode(r, SDL_BLENDMODE_BLEND);
 
-    for (int i = 0; i < v->item_count; ++i) {
+    for (int i = 0; i < v->laid; ++i) {
         ViewItem *it = &v->items[i];
         const Block *b = it->block;
-        float y0 = (b->kind == BLOCK_CODE || b->kind == BLOCK_TABLE || b->kind == BLOCK_HTML)
-                       ? it->box_y : it->y;
-        float y1 = (b->kind == BLOCK_CODE || b->kind == BLOCK_TABLE || b->kind == BLOCK_HTML)
-                       ? it->box_y + it->box_h : it->y + it->h;
+        float y0 = item_top(it);
+        float y1 = is_boxed(b) ? it->box_y + it->box_h : it->y + it->h;
         if (y1 < top) continue;
-        if (y0 > bottom) break; /* items are laid out top to bottom */
-
+        if (y0 > bottom) break;
         float dy = -v->scroll;
 
-        /* Block quote bars. */
         for (int q = 0; q < b->quote_depth; ++q) {
-            float qx = it->x - (b->quote_depth - q) * QUOTE_INDENT * s
-                       - (b->kind == BLOCK_CODE ? 14 * s : 0);
-            SDL_FRect bar = {qx, y0 + dy - 4 * s, 4 * s, (y1 - y0) + 8 * s + 12 * s};
+            float qx = SDL_floorf((v->width - SDL_min(MAX_WIDTH * s, v->width - 2 * MARGIN * s)) * 0.5f)
+                       + b->list_depth * LIST_INDENT * s + q * QUOTE_INDENT * s;
+            SDL_FRect bar = {qx, y0 + dy - 4 * s, 4 * s, (y1 - y0) + 8 * s + 10 * s};
             set_color(r, th->quote_bar);
             SDL_RenderFillRect(r, &bar);
         }
 
         switch (b->kind) {
         case BLOCK_RULE: {
-            SDL_FRect line = {it->x, it->y + dy, it->w, it->h};
+            SDL_FRect l = {it->x, it->y + dy, it->w, it->h};
             set_color(r, th->rule);
-            SDL_RenderFillRect(r, &line);
+            SDL_RenderFillRect(r, &l);
             break;
         }
         case BLOCK_CODE:
-        case BLOCK_TABLE:
         case BLOCK_HTML: {
-            float pad = 14 * s;
+            float pad = CODE_PAD * s;
             SDL_FRect box = {it->x - pad, it->box_y + dy, it->w + 2 * pad, it->box_h};
             set_color(r, th->code_bg);
             SDL_RenderFillRect(r, &box);
-            if (it->lang) TTF_DrawRendererText(it->lang, it->x, it->box_y + dy + pad * 0.6f);
-            break;
+            if (it->lang.count) draw_para(v, r, &it->lang, it->x, it->box_y + dy + pad * 0.6f);
+            /* Long lines are clipped to the box (no wrapping in code). */
+            SDL_Rect clip = {(int)box.x, (int)box.y, (int)box.w, (int)box.h};
+            SDL_SetRenderClipRect(r, &clip);
+            draw_para(v, r, &it->para, it->x, it->y + dy);
+            SDL_SetRenderClipRect(r, NULL);
+            continue;
         }
+        case BLOCK_TABLE:
+            draw_table(v, r, it, dy);
+            continue;
         case BLOCK_HEADING:
             if (b->level <= 2) {
-                SDL_FRect line = {it->x, it->y + it->h + dy + 8 * s, it->w, SDL_max(1.0f, s)};
+                SDL_FRect l = {it->x, it->y + it->h + dy + 8 * s, it->w, SDL_max(1.0f, s)};
                 set_color(r, th->rule);
-                SDL_RenderFillRect(r, &line);
+                SDL_RenderFillRect(r, &l);
             }
             break;
         default:
             break;
         }
 
-        if (it->marker && b->task == TASK_NONE) { /* task items show a checkbox instead */
-            int mw, mh;
-            TTF_GetTextSize(it->marker, &mw, &mh);
-            float mx = it->x - (float)mw - 8 * s;
-            TTF_DrawRendererText(it->marker, mx, it->y + dy);
+        if (it->marker.count) {
+            draw_para(v, r, &it->marker, it->x - it->marker.w - 8 * s, it->y + dy);
         }
-
-        float tx = it->x;
         if (b->task != TASK_NONE) {
             float size = 14 * s;
-            draw_checkbox(r, th, tx, it->y + dy + 3 * s, size, b->task == TASK_CHECKED, s);
-            tx += size + 8 * s;
+            float line_h = BODY_PX * s * LINE_FACTOR;
+            draw_checkbox(r, th, it->x - 22 * s, it->y + dy + (line_h - size) * 0.5f, size,
+                          b->task == TASK_CHECKED, s);
         }
-
-        if (it->text) TTF_DrawRendererText(it->text, tx, it->y + dy);
+        draw_para(v, r, &it->para, it->x, it->y + dy);
     }
+}
+
+static bool para_link_at(View *v, const Para *p, float ox, float oy, float x, float y,
+                         const char **url, size_t *len)
+{
+    for (int i = p->first; i < p->first + p->count; ++i) {
+        const Frag *f = &v->frags[i];
+        if (!f->url_len || !(f->style & ST_LINK)) continue;
+        if (x >= ox + f->x && x < ox + f->x + f->w && y >= oy + f->y && y < oy + f->y + f->h) {
+            *url = v->doc->strings + f->url;
+            *len = f->url_len;
+            return true;
+        }
+    }
+    return false;
+}
+
+bool view_link_at(View *v, float x, float y, const char **url, size_t *len)
+{
+    float dy = y + v->scroll;
+    for (int i = 0; i < v->laid; ++i) {
+        ViewItem *it = &v->items[i];
+        float y0 = item_top(it);
+        float y1 = is_boxed(it->block) ? it->box_y + it->box_h : it->y + it->h;
+        if (dy < y0 || dy > y1) continue;
+        if (it->block->kind == BLOCK_TABLE) {
+            for (uint32_t c = 0; c < it->block->cell_count; ++c) {
+                ViewCell *vc = &it->cells[c];
+                if (para_link_at(v, &vc->para, it->x + vc->x, it->y + vc->y, x, dy, url, len)) return true;
+            }
+            return false;
+        }
+        return para_link_at(v, &it->para, it->x, it->y, x, dy, url, len);
+    }
+    return false;
 }
 
 void view_draw_message(View *v, SDL_Renderer *r, const char *title, const char *body)
@@ -349,8 +923,8 @@ void view_draw_message(View *v, SDL_Renderer *r, const char *title, const char *
         TTF_SetTextString(v->msg_title, title, 0);
         TTF_SetTextString(v->msg_body, body, 0);
     }
-    text_color(v->msg_title, v->theme.text);
-    text_color(v->msg_body, v->theme.muted);
+    TTF_SetTextColor(v->msg_title, v->theme.text.r, v->theme.text.g, v->theme.text.b, 0xFF);
+    TTF_SetTextColor(v->msg_body, v->theme.muted.r, v->theme.muted.g, v->theme.muted.b, 0xFF);
     TTF_SetTextWrapWidth(v->msg_body, (int)SDL_max(v->width - 64 * s, 1.0f));
 
     int tw, th, bw, bh;

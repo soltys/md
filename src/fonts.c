@@ -3,13 +3,14 @@
 
 #include <SDL3/SDL.h>
 
-#define MAX_CACHED_FONTS 64
+#define MAX_CACHED_FONTS 128
 
 typedef struct FontEntry {
     FontFace face;
     float px;
     TTF_Font *font;
-    TTF_Font *emoji; /* fallback, same size */
+    TTF_Font *emoji; /* fallback, same size, shared between faces */
+    bool owns_emoji;
 } FontEntry;
 
 static const int face_asset[FONT_FACE_COUNT] = {
@@ -52,7 +53,16 @@ static TTF_Font *create_entry(FontFace face, float px)
     TTF_Font *font = open_asset(face_asset[face], px);
     if (!font) return NULL;
 
-    TTF_Font *emoji = open_asset(ASSET_NOTO_EMOJI, px);
+    /* One emoji face per size, shared by all text faces of that size. */
+    TTF_Font *emoji = NULL;
+    bool owns = false;
+    for (int i = 0; i < cache_count && !emoji; ++i) {
+        if (cache[i].px == px && cache[i].emoji) emoji = cache[i].emoji;
+    }
+    if (!emoji) {
+        emoji = open_asset(ASSET_NOTO_EMOJI, px);
+        owns = emoji != NULL;
+    }
     if (emoji) TTF_AddFallbackFont(font, emoji);
 
     FontEntry *e = &cache[cache_count++];
@@ -60,6 +70,7 @@ static TTF_Font *create_entry(FontFace face, float px)
     e->px = px;
     e->font = font;
     e->emoji = emoji;
+    e->owns_emoji = owns;
     return font;
 }
 
@@ -82,11 +93,23 @@ TTF_Font *fonts_get(FontFace face, float px)
     return font;
 }
 
+TTF_Font *fonts_get_emoji(float px)
+{
+    px = SDL_roundf(px * 4.0f) / 4.0f;
+    fonts_get(FONT_REGULAR, px);
+    for (int i = 0; i < cache_count; ++i) {
+        if (cache[i].face == FONT_REGULAR && cache[i].px == px) return cache[i].emoji;
+    }
+    return NULL;
+}
+
 void fonts_shutdown(void)
 {
     for (int i = 0; i < cache_count; ++i) {
         TTF_CloseFont(cache[i].font);
-        if (cache[i].emoji) TTF_CloseFont(cache[i].emoji);
+    }
+    for (int i = 0; i < cache_count; ++i) {
+        if (cache[i].owns_emoji) TTF_CloseFont(cache[i].emoji);
     }
     cache_count = 0;
     TTF_Quit();

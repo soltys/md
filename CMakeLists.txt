@@ -26,6 +26,7 @@ set(CMAKE_INTERPROCEDURAL_OPTIMIZATION_MINSIZEREL ON)
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 include(Dependencies)
 include(Fonts)
+include(Grammars)
 
 add_executable(md WIN32
     src/main.c
@@ -46,6 +47,15 @@ add_executable(md WIN32
     src/msgpack.h
     src/editor.c
     src/editor.h
+    src/emoji.c
+    src/emoji.h
+    src/images.c
+    src/images.h
+    src/highlight.c
+    src/highlight.h
+    src/regex.c
+    src/regex.h
+    ${MD_QUERIES_SOURCE}
 )
 
 # Neovim config for the editor pane, embedded like the fonts.
@@ -59,6 +69,7 @@ target_link_libraries(md PRIVATE
     md_tree_sitter
     md_ts_markdown
     md_ts_markdown_inline
+    ${MD_GRAMMAR_LIBS}
 )
 
 if(WIN32)

@@ -27,6 +27,9 @@ bool fonts_init(float warm_px);
  * with Noto Color Emoji attached as fallback. Fonts are cached forever. */
 TTF_Font *fonts_get(FontFace face, float px);
 
+/* Noto Color Emoji at the given size (main thread only). */
+TTF_Font *fonts_get_emoji(float px);
+
 void fonts_shutdown(void);
 
 #endif
