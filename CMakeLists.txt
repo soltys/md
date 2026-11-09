@@ -108,3 +108,9 @@ if(MSVC)
 else()
     target_compile_options(md PRIVATE -Wall -Wextra -Wno-unused-parameter)
 endif()
+
+# Companion tools, each its own executable.
+option(MD_BUILD_TOOLS "Build the companion tools (pixel.exe)" ON)
+if(MD_BUILD_TOOLS)
+    add_subdirectory(tools/pixel)
+endif()

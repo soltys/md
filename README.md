@@ -122,6 +122,47 @@ nvim --embed -u %APPDATA%\md\init.lua [file.md]
 nvim -u nvim\init.lua README.md
 ```
 
+## pixel: PICO-8 pixel art tool
+
+`tools/pixel` builds `pixel.exe`, a small pixel art editor for md's icons and
+artwork. It only knows the 16 colours of the
+[PICO-8 palette](https://pico-8.fandom.com/wiki/Palette) plus transparent, and
+like md it is one self-contained executable (SDL3 + SDL3_image, static CRT).
+It is built with the rest of the project (`-DMD_BUILD_TOOLS=OFF` skips it):
+
+```bat
+cmake --build --preset release --target pixel
+build\vs2026\Release\pixel.exe art\icon.png 32x32
+```
+
+`pixel.exe [file.png] [WxH]` opens the PNG, or starts a new canvas (16x16 by
+default, up to 256x256) that is saved to that name. Opened images are mapped
+to the nearest PICO-8 colour. Ctrl+S saves a 1:1 PNG with a transparent
+background; Ctrl+E also writes `<name>@8x.png` and, for square canvases,
+`<name>.ico` with every Windows icon size that is a whole multiple of the
+canvas (a 16x16 or 32x32 drawing gives crisp 16 to 256 px icons).
+
+| Key / mouse | Action |
+| --- | --- |
+| Left / right button | Draw with colour 1 / colour 2 (transparent by default) |
+| Click / right-click palette | Choose colour 1 / colour 2 |
+| B, L, R, F, I | Pencil, line, rectangle (hold Shift: filled), fill, picker |
+| Alt+click | Pick a colour from the canvas |
+| X, [ ] | Swap colours, previous / next colour |
+| M | Mirror drawing: off, left/right, top/bottom, both |
+| G | Grid on/off |
+| N / Shift+N | Canvas size up / down (8, 16, 32, 64, 128, 256) |
+| Shift+arrows | Shift the image by one pixel (wraps around) |
+| H / V | Flip horizontally / vertically |
+| Wheel, Ctrl+= / Ctrl+-, Home | Zoom, fit to window |
+| Middle drag or Space+drag | Pan |
+| Ctrl+Z / Ctrl+Y | Undo / redo |
+| Ctrl+N | Clear the canvas |
+| Ctrl+O or drop a file | Open a PNG |
+| Ctrl+S / Ctrl+Shift+S | Save / save as |
+| Ctrl+E | Export `@8x.png` and `.ico` next to the saved PNG |
+| F1 | Help |
+
 ## How startup is kept fast
 
 1. Before `SDL_Init`, three threads start: one initialises FreeType/HarfBuzz
@@ -150,6 +191,7 @@ nvim -u nvim\init.lua README.md
 | `src/editor.c` | Draws Neovim's grid |
 | `src/fonts.c`, `src/assets.c` | Embedded fonts (RCDATA) and font cache |
 | `src/emoji.c`, `src/images.c` | Emoji clustering, async image loading |
+| `tools/pixel/pixel.c` | `pixel.exe`, the PICO-8 pixel art tool |
 
 ## Status
 
