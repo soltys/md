@@ -50,6 +50,12 @@ typedef struct App {
     SDL_FRect editor_rect, viewer_rect;
     bool mouse_down_editor;
 
+    /* Scroll sync. The editor reports its top line (md_scroll); scrolling
+     * the viewer sends one back. The echo of a line md sent is ignored. */
+    bool viewer_scrolled;
+    int sent_top;
+    Uint64 sent_at;
+
     /* Viewer text selection by mouse. */
     bool selecting;      /* left button went down in the viewer */
     bool sel_dragged;    /* moved far enough to count as a drag */

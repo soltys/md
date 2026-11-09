@@ -231,7 +231,11 @@ static void take_loaded_document(void)
 
     bool same_file = app.view.doc && doc->path && app.view.doc->path &&
                      SDL_strcmp(doc->path, app.view.doc->path) == 0;
-    view_set_document(&app.view, doc, same_file);
+    /* A preview of the editor's buffer follows the editor, whatever the
+     * path spelling (relative on the command line, absolute from nvim). */
+    bool follow = editor_visible() && app.nvim.attached && app.nvim.top_line > 0;
+    view_set_document(&app.view, doc, same_file || follow);
+    if (follow) view_scroll_to_line(&app.view, app.nvim.top_line);
     update_title();
     app.dirty = true;
 
@@ -261,7 +265,10 @@ static void pump_nvim(void)
         }
         if (nv->scrolled) {
             nv->scrolled = false;
-            if (viewer_visible()) {
+            /* Skip the echo of a scroll md itself asked for. */
+            bool echo = nv->top_line == app.sent_top ||
+                        SDL_GetTicks() - app.sent_at < 250;
+            if (viewer_visible() && !echo) {
                 view_scroll_to_line(&app.view, nv->top_line);
                 app.dirty = true;
             }
@@ -466,6 +473,7 @@ static void viewer_key(const SDL_KeyboardEvent *k)
     case SDLK_END:      view_scroll_to_end(v); break;
     default:            return;
     }
+    app.viewer_scrolled = true;
     app.dirty = true;
 }
 
@@ -684,6 +692,7 @@ static bool handle_event(const SDL_Event *e)
             for (int i = 0; i < steps && i < 10; ++i) editor_mouse("wheel", dir, x, y);
         } else {
             view_scroll_by(&app.view, -e->wheel.y * 3 * view_line_height(&app.view));
+            app.viewer_scrolled = true;
             app.dirty = true;
         }
         break;
@@ -760,8 +769,10 @@ static bool handle_event(const SDL_Event *e)
             if (app.sel_dragged) {
                 /* Dragging past the top/bottom edge scrolls. */
                 const SDL_FRect *vr = &app.viewer_rect;
-                if (y < vr->y) view_scroll_by(&app.view, y - vr->y);
-                else if (y > vr->y + vr->h) view_scroll_by(&app.view, y - (vr->y + vr->h));
+                if (y < vr->y || y > vr->y + vr->h) {
+                    view_scroll_by(&app.view, y < vr->y ? y - vr->y : y - (vr->y + vr->h));
+                    app.viewer_scrolled = true;
+                }
                 view_select_extend(&app.view, x - vr->x, y - vr->y);
                 app.dirty = true;
             }
@@ -813,6 +824,19 @@ static bool handle_event(const SDL_Event *e)
         break;
     }
     return !app.quitting;
+}
+
+/* Viewer -> editor scroll sync, once per batch of input events. */
+static void sync_editor_to_viewer(void)
+{
+    app.viewer_scrolled = false;
+    if (!editor_visible() || !viewer_visible() || !app.nvim.attached) return;
+    int line = view_top_line(&app.view);
+    if (line == app.sent_top && line == app.nvim.top_line) return;
+    app.sent_top = line;
+    app.sent_at = SDL_GetTicks();
+    app.nvim.top_line = line;
+    nvim_scroll_to_line(&app.nvim, line);
 }
 
 /* -------------------------------------------------------------- main -- */
@@ -891,6 +915,7 @@ int main(int argc, char **argv)
         do {
             running = handle_event(&e);
         } while (running && SDL_PollEvent(&e));
+        if (running && app.viewer_scrolled) sync_editor_to_viewer();
         if (running && app.dirty) render();
     }
 

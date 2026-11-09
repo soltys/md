@@ -714,6 +714,25 @@ void view_scroll_to_end(View *v)
     view_scroll_to(v, v->content_height);
 }
 
+/* Source lines a block spans (at least 1). */
+static int block_lines(const Document *doc, const Block *b)
+{
+    int n = 0;
+    if (doc->source && b->src_end <= doc->source_len) {
+        for (uint32_t i = b->src_start; i < b->src_end; ++i) n += doc->source[i] == '\n';
+        /* A trailing newline ends the last line rather than starting one. */
+        if (b->src_end > b->src_start && doc->source[b->src_end - 1] == '\n') --n;
+    }
+    return n + 1;
+}
+
+static float item_height(const ViewItem *it)
+{
+    return is_boxed(it->block) ? it->box_h : it->h;
+}
+
+/* Lines map to blocks; inside a block the position is interpolated, so long
+ * code blocks and paragraphs scroll smoothly both ways. */
 void view_scroll_to_line(View *v, int line)
 {
     if (!v->doc || v->item_count == 0) return;
@@ -723,7 +742,28 @@ void view_scroll_to_line(View *v, int line)
         else break;
     }
     layout_until(v, best, 0);
-    view_scroll_to(v, item_top(&v->items[best]) - MARGIN * v->scale);
+    const ViewItem *it = &v->items[best];
+    int lines = block_lines(v->doc, it->block);
+    int into = line - (int)it->block->src_line;
+    float frac = into <= 0 ? 0 : into >= lines ? 1 : (float)into / (float)lines;
+    view_scroll_to(v, item_top(it) + frac * item_height(it) - MARGIN * v->scale);
+}
+
+int view_top_line(const View *v)
+{
+    if (!v->doc || v->laid == 0) return 1;
+    float y = v->scroll + MARGIN * v->scale;
+    const ViewItem *it = &v->items[0];
+    for (int i = 0; i < v->laid; ++i) {
+        if (item_top(&v->items[i]) <= y + 0.5f) it = &v->items[i];
+        else break;
+    }
+    float h = item_height(it);
+    int lines = block_lines(v->doc, it->block);
+    float frac = h > 0 ? (y - item_top(it)) / h : 0;
+    int into = frac <= 0 ? 0 : (int)(frac * (float)lines);
+    if (into >= lines) into = lines; /* the gap after the block: next line */
+    return (int)it->block->src_line + into;
 }
 
 /* -------------------------------------------------------------- draw -- */

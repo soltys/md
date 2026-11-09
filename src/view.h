@@ -100,6 +100,8 @@ void view_scroll_to(View *v, float y);
 void view_scroll_to_end(View *v);
 /* Scrolls so the block containing source line `line` (1-based) is on top. */
 void view_scroll_to_line(View *v, int line);
+/* The source line shown at the top of the viewport (1-based). */
+int view_top_line(const View *v);
 float view_line_height(const View *v);
 
 /* Link under a viewport position (pixels); returns false if none. */

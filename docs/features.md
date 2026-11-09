@@ -19,7 +19,7 @@ follows as you type.
 | `Ctrl+A` | Select all text in the preview |
 | `Ctrl+C` | Copy the selected text (shows "Copied N characters") |
 | Mouse drag | Select text in the preview; Shift+click extends it |
-| `PgUp` / `PgDn` / `Space` / `Home` / `End` | Scroll the preview (when it has focus) |
+| `PgUp` / `PgDn` / `Space` / `Home` / `End` | Scroll the preview (when it has focus); the editor follows |
 
 Everything else typed in the editor goes to Neovim. Closing the window asks
 Neovim to quit, so unsaved changes are never lost silently.

@@ -4,7 +4,9 @@
 #ifdef _WIN32
 #include <windows.h>
 #else
+#include <errno.h>
 #include <fcntl.h>
+#include <unistd.h>
 #endif
 
 static SDL_Thread *start_thread;
@@ -129,6 +131,40 @@ static void wake(Nvim *nv)
     SDL_PushEvent(&ev);
 }
 
+/* One read of whatever is available. SDL_ReadIO is avoided on purpose: on
+ * POSIX it follows a short read with a second read() to rule out EOF, which
+ * on a blocking pipe waits for nvim's *next* output, so the tail of every
+ * burst (a response, the last redraw) arrived late. Returns bytes read,
+ * 0 when nothing is ready, -1 on EOF or error. */
+static long long read_some(SDL_IOStream *io, char *dst, size_t size)
+{
+    SDL_PropertiesID props = SDL_GetIOProperties(io);
+#ifdef _WIN32
+    HANDLE h = SDL_GetPointerProperty(props, SDL_PROP_IOSTREAM_WINDOWS_HANDLE_POINTER, NULL);
+    if (h) {
+        DWORD got = 0;
+        if (!ReadFile(h, dst, (DWORD)SDL_min(size, 1u << 30), &got, NULL)) {
+            return GetLastError() == ERROR_NO_DATA ? 0 : -1;
+        }
+        return got > 0 ? (long long)got : -1;
+    }
+#else
+    int fd = (int)SDL_GetNumberProperty(props, SDL_PROP_IOSTREAM_FILE_DESCRIPTOR_NUMBER, -1);
+    if (fd >= 0) {
+        for (;;) {
+            ssize_t got = read(fd, dst, size);
+            if (got > 0) return (long long)got;
+            if (got == 0) return -1;
+            if (errno == EINTR) continue;
+            return errno == EAGAIN ? 0 : -1;
+        }
+    }
+#endif
+    size_t got = SDL_ReadIO(io, dst, size);
+    if (got > 0) return (long long)got;
+    return SDL_GetIOStatus(io) == SDL_IO_STATUS_NOT_READY ? 0 : -1;
+}
+
 static int SDLCALL reader_main(void *userdata)
 {
     Nvim *nv = userdata;
@@ -140,13 +176,10 @@ static int SDLCALL reader_main(void *userdata)
             cap *= 2;
             buf = SDL_realloc(buf, cap);
         }
-        size_t got = SDL_ReadIO(nv->out, buf + len, cap - len);
-        if (got == 0) {
-            SDL_IOStatus st = SDL_GetIOStatus(nv->out);
-            if (st == SDL_IO_STATUS_NOT_READY) { SDL_Delay(2); continue; }
-            break; /* EOF or error: nvim is gone */
-        }
-        len += got;
+        long long got = read_some(nv->out, buf + len, cap - len);
+        if (got == 0) { SDL_Delay(2); continue; } /* not ready (non-blocking fallback) */
+        if (got < 0) break; /* EOF or error: nvim is gone */
+        len += (size_t)got;
 
         size_t pos = 0;
         bool queued = false;
@@ -289,6 +322,28 @@ void nvim_input_mouse(Nvim *nv, const char *button, const char *action,
 void nvim_edit_file(Nvim *nv, const char *path)
 {
     exec_lua_notify(nv, "vim.cmd.edit(vim.fn.fnameescape(...))", path);
+}
+
+void nvim_scroll_to_line(Nvim *nv, int line)
+{
+    if (!nv->attached) return;
+    char arg[16];
+    SDL_snprintf(arg, sizeof arg, "%d", line);
+    /* Moves the cursor only when it would end up off screen, then sets the
+     * top line, like scrolling with the mouse wheel. */
+    exec_lua_notify(nv,
+        "local l = tonumber(...)\n"
+        "local w = vim.api.nvim_get_current_win()\n"
+        "local n = vim.api.nvim_buf_line_count(0)\n"
+        "l = math.max(1, math.min(l, n))\n"
+        "local h = vim.api.nvim_win_get_height(w)\n"
+        "local so = math.min(vim.wo[w].scrolloff, math.floor((h - 1) / 2))\n"
+        "local c = vim.api.nvim_win_get_cursor(w)[1]\n"
+        "local lo, hi = l + so, l + h - 1 - so\n"
+        "if c < lo or c > hi then\n"
+        "  vim.api.nvim_win_set_cursor(w, { math.min(lo, n), 0 })\n"
+        "end\n"
+        "vim.fn.winrestview({ topline = l })", arg);
 }
 
 void nvim_request_quit(Nvim *nv)
