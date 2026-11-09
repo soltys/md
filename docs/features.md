@@ -1,7 +1,7 @@
 # md feature tour 🚀
 
 This file shows everything **md** can render. Open it with `md.exe docs\features.md`
-to view it, then press `Ctrl+Shift+S` to edit it beside the preview, which
+to view it, then press `Ctrl+Shift+S` (or start with `md.exe -e`) to edit it beside the preview, which
 follows as you type.
 
 ## Keyboard shortcuts

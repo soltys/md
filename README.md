@@ -52,11 +52,12 @@ build\ninja-release\md.exe README.md
 ## Usage
 
 ```
-md.exe file.md
+md.exe file.md          # viewer only
+md.exe -e file.md       # editor open from the start (also --edit)
 ```
 
-md opens as a **viewer**: just the rendered Markdown. Press Ctrl+Shift+S to
-start Neovim and bring it in beside the preview. Neovim is only launched when
+md opens as a **viewer**: just the rendered Markdown. Press Ctrl+Shift+S (or
+start md with `-e`) to start Neovim and bring it in beside the preview. Neovim is only launched when
 you first ask for the editor, so a plain view never runs it. The preview
 follows the buffer as you type, and scrolling stays in sync both ways: scroll
 the editor and the preview follows, scroll the preview and the editor follows.

@@ -25,6 +25,7 @@ typedef struct App {
     Editor editor;
     Nvim nvim;
     bool nvim_started;   /* Neovim is launched on first use of the editor */
+    bool nvim_starting;  /* launched, not yet waited for */
     bool nvim_ok;        /* started and running */
     const char *start_file; /* file from the command line */
 

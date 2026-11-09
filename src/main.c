@@ -481,15 +481,24 @@ static void viewer_key(const SDL_KeyboardEvent *k)
 /* Neovim starts only when the editor is first asked for. Spawning the
  * process is quick; nvim's own startup runs while md keeps going, and the
  * pane fills in once it draws. */
+static void begin_nvim(const char *file)
+{
+    app.nvim_started = true;
+    app.nvim_starting = true;
+    nvim_start_async(&app.nvim, file, app.wake_event);
+}
+
 static bool ensure_nvim(void)
 {
-    if (app.nvim_started) return app.nvim_ok;
-    if (!app.fonts_ok) return false;
-    app.nvim_started = true;
-    const char *file = app.view.doc && app.view.doc->path && app.view.doc->path[0]
-                     ? app.view.doc->path : app.start_file;
-    nvim_start_async(&app.nvim, file, app.wake_event);
-    app.nvim_ok = nvim_wait_started(&app.nvim);
+    if (!app.nvim_started) {
+        if (!app.fonts_ok) return false;
+        begin_nvim(app.view.doc && app.view.doc->path && app.view.doc->path[0]
+                   ? app.view.doc->path : app.start_file);
+    }
+    if (!app.nvim_starting) return app.nvim_ok;
+    app.nvim_starting = false;
+    app.nvim.wake_event = app.wake_event;
+    app.nvim_ok = app.fonts_ok && nvim_wait_started(&app.nvim);
     if (app.nvim_ok) {
         editor_init(&app.editor, app.engine, &app.nvim);
     } else {
@@ -885,12 +894,19 @@ static void sync_editor_to_viewer(void)
 
 int main(int argc, char **argv)
 {
-    const char *file = argc > 1 ? argv[1] : NULL;
+    /* md [-e | --edit] [file.md] */
+    const char *file = NULL;
+    bool edit = false;
+    for (int i = 1; i < argc; ++i) {
+        if (SDL_strcmp(argv[i], "-e") == 0 || SDL_strcmp(argv[i], "--edit") == 0) edit = true;
+        else if (!file) file = argv[i];
+    }
 
     /* 1. Kick off background work before touching the window system. */
     app.font_thread = SDL_CreateThread(font_thread_main, "md-fonts", NULL);
     if (file) start_load(file);
     app.start_file = file;
+    if (edit) begin_nvim(file); /* overlaps with window creation */
 
     /* 2. Window + renderer. */
     SDL_SetHint(SDL_HINT_RENDER_VSYNC, "1");
@@ -919,9 +935,15 @@ int main(int argc, char **argv)
      *    Presenting before showing avoids a white/black flash. */
     const Theme *theme = app.dark ? &THEME_DARK : &THEME_LIGHT;
     app.view.theme = *theme;
+    if (edit) { /* paint the split right away; nvim fills it in later */
+        app.layout = LAYOUT_SPLIT;
+        app.nvim_ok = true;
+    }
     relayout();
     render();
     SDL_ShowWindow(app.window);
+    app.nvim_ok = false;
+    app.layout = LAYOUT_VIEWER;
 
     /* 4. Text needs the fonts; by now they are usually ready. */
     int font_status = -1;
@@ -936,7 +958,8 @@ int main(int argc, char **argv)
     }
     view_init(&app.view, app.engine, theme);
 
-    relayout();
+    if (edit) set_layout(LAYOUT_VIEWER); /* toggles to the split, focus on the editor */
+    else relayout();
     take_loaded_document(); /* in case the loader already finished */
     render();
 
