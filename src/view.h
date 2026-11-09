@@ -34,8 +34,12 @@ typedef struct View {
 void view_init(View *v, TTF_TextEngine *engine, const Theme *theme);
 void view_destroy(View *v);
 
-/* Takes ownership of doc (may be NULL). */
-void view_set_document(View *v, Document *doc);
+/* Takes ownership of doc (may be NULL). keep_scroll keeps the position
+ * (live preview); otherwise the view starts at the top. */
+void view_set_document(View *v, Document *doc, bool keep_scroll);
+
+/* Scrolls so the block containing source line `line` (1-based) is on top. */
+void view_scroll_to_line(View *v, int line);
 
 /* Recomputes layout for the given output size (pixels) and display scale. */
 void view_layout(View *v, float width, float height, float scale);

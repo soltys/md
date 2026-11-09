@@ -30,6 +30,7 @@ typedef struct Block {
     uint32_t lang_len;
     uint32_t src_start;   /* byte range in the source, for scroll sync later */
     uint32_t src_end;
+    uint32_t src_line;    /* 1-based first source line */
 } Block;
 
 typedef struct Document {
@@ -48,6 +49,9 @@ typedef struct Document {
 /* Reads and parses a file. Thread-safe, intended for a worker thread.
  * Always returns a document; check ->error. */
 Document *document_load(const char *path);
+
+/* Parses text already in memory; takes ownership of `text` (SDL_malloc). */
+Document *document_parse(const char *path, char *text, size_t len);
 void document_free(Document *doc);
 
 static inline const char *document_str(const Document *doc, uint32_t off)

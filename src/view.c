@@ -71,8 +71,9 @@ void view_destroy(View *v)
     v->doc = NULL;
 }
 
-void view_set_document(View *v, Document *doc)
+void view_set_document(View *v, Document *doc, bool keep_scroll)
 {
+    float old_scroll = v->scroll;
     free_items(v);
     document_free(v->doc);
     v->doc = doc;
@@ -108,6 +109,21 @@ void view_set_document(View *v, Document *doc)
     float w = v->width, h = v->height;
     v->width = 0;
     view_layout(v, w, h, v->scale);
+    if (keep_scroll) view_scroll_to(v, old_scroll);
+}
+
+void view_scroll_to_line(View *v, int line)
+{
+    if (!v->doc || v->item_count == 0) return;
+    int best = 0;
+    for (int i = 0; i < v->item_count; ++i) {
+        if ((int)v->items[i].block->src_line <= line) best = i;
+        else break;
+    }
+    const ViewItem *it = &v->items[best];
+    const Block *b = it->block;
+    float y = (b->kind == BLOCK_CODE || b->kind == BLOCK_TABLE || b->kind == BLOCK_HTML) ? it->box_y : it->y;
+    view_scroll_to(v, y - MARGIN * v->scale);
 }
 
 static void refresh_fonts(View *v)

@@ -42,6 +42,10 @@ add_executable(md WIN32
     src/theme.h
     src/nvim.c
     src/nvim.h
+    src/msgpack.c
+    src/msgpack.h
+    src/editor.c
+    src/editor.h
 )
 
 # Neovim config for the editor pane, embedded like the fonts.
@@ -64,7 +68,7 @@ if(WIN32)
     configure_file(src/assets.rc.in "${CMAKE_CURRENT_BINARY_DIR}/generated/assets.rc" @ONLY)
     # rc.exe does not track RCDATA inputs; rebuild when any of them changes.
     set_source_files_properties("${CMAKE_CURRENT_BINARY_DIR}/generated/assets.rc" PROPERTIES
-        OBJECT_DEPENDS "${MD_FONT_ROBOTO_REGULAR};${MD_FONT_ROBOTO_ITALIC};${MD_FONT_ROBOTO_MEDIUM};${MD_FONT_ROBOTO_BOLD};${MD_FONT_ROBOTO_BOLD_ITALIC};${MD_FONT_ROBOTO_LIGHT};${MD_FONT_ROBOTO_MONO};${MD_FONT_ROBOTO_MONO_ITALIC};${MD_FONT_NOTO_EMOJI};${MD_NVIM_INIT}")
+        OBJECT_DEPENDS "${MD_FONT_ROBOTO_REGULAR};${MD_FONT_ROBOTO_ITALIC};${MD_FONT_ROBOTO_MEDIUM};${MD_FONT_ROBOTO_BOLD};${MD_FONT_ROBOTO_BOLD_ITALIC};${MD_FONT_ROBOTO_LIGHT};${MD_FONT_ROBOTO_MONO};${MD_FONT_ROBOTO_MONO_ITALIC};${MD_FONT_NOTO_EMOJI};${MD_NVIM_INIT};${MD_FONT_ROBOTO_MONO_BOLD};${MD_FONT_ROBOTO_MONO_BOLD_ITALIC}")
     target_sources(md PRIVATE
         "${CMAKE_CURRENT_BINARY_DIR}/generated/assets.rc"
         src/md.manifest)
@@ -80,7 +84,9 @@ else()
         MD_ASSET_ROBOTO_MONO="${MD_FONT_ROBOTO_MONO}"
         MD_ASSET_ROBOTO_MONO_ITALIC="${MD_FONT_ROBOTO_MONO_ITALIC}"
         MD_ASSET_NOTO_EMOJI="${MD_FONT_NOTO_EMOJI}"
-        MD_ASSET_NVIM_INIT="${MD_NVIM_INIT}")
+        MD_ASSET_NVIM_INIT="${MD_NVIM_INIT}"
+        MD_ASSET_ROBOTO_MONO_BOLD="${MD_FONT_ROBOTO_MONO_BOLD}"
+        MD_ASSET_ROBOTO_MONO_BOLD_ITALIC="${MD_FONT_ROBOTO_MONO_BOLD_ITALIC}")
 endif()
 
 if(MSVC)

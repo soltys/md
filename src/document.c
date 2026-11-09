@@ -108,6 +108,7 @@ static Block *push_block(Document *doc, BlockKind kind, TSNode n, Ctx *ctx)
     b->quote_depth = ctx->quote_depth;
     b->src_start = ts_node_start_byte(n);
     b->src_end = ts_node_end_byte(n);
+    b->src_line = ts_node_start_point(n).row + 1;
     if (ctx->marker) {
         b->marker = str_begin(doc);
         str_append(doc, ctx->marker, ctx->marker_len);
@@ -254,29 +255,22 @@ static Document *fail(Document *doc, const char *what)
     return doc;
 }
 
-Document *document_load(const char *path)
+static Document *parse(Document *doc)
 {
-    Document *doc = SDL_calloc(1, sizeof(Document));
-    doc->path = SDL_strdup(path);
-
-    doc->source = SDL_LoadFile(path, &doc->source_len);
-    if (!doc->source) return fail(doc, "Cannot open file");
     if (doc->source_len > UINT32_MAX / 2) {
         SDL_asprintf(&doc->error, "File is too large");
         return doc;
     }
-
-    /* Skip a UTF-8 BOM. */
-    const char *src = doc->source;
     uint32_t src_len = (uint32_t)doc->source_len;
-    if (src_len >= 3 && (unsigned char)src[0] == 0xEF && (unsigned char)src[1] == 0xBB &&
-        (unsigned char)src[2] == 0xBF) {
+    /* Blank out a UTF-8 BOM (keeps byte offsets stable). */
+    if (src_len >= 3 && (unsigned char)doc->source[0] == 0xEF &&
+        (unsigned char)doc->source[1] == 0xBB && (unsigned char)doc->source[2] == 0xBF) {
         SDL_memset(doc->source, ' ', 3);
     }
 
     TSParser *parser = ts_parser_new();
     ts_parser_set_language(parser, tree_sitter_markdown());
-    TSTree *tree = ts_parser_parse_string(parser, NULL, src, src_len);
+    TSTree *tree = ts_parser_parse_string(parser, NULL, doc->source, src_len);
     ts_parser_delete(parser);
     if (!tree) {
         SDL_asprintf(&doc->error, "Cannot parse file");
@@ -287,6 +281,24 @@ Document *document_load(const char *path)
     walk(doc, ts_tree_root_node(tree), &ctx);
     ts_tree_delete(tree);
     return doc;
+}
+
+Document *document_load(const char *path)
+{
+    Document *doc = SDL_calloc(1, sizeof(Document));
+    doc->path = SDL_strdup(path);
+    doc->source = SDL_LoadFile(path, &doc->source_len);
+    if (!doc->source) return fail(doc, "Cannot open file");
+    return parse(doc);
+}
+
+Document *document_parse(const char *path, char *text, size_t len)
+{
+    Document *doc = SDL_calloc(1, sizeof(Document));
+    doc->path = SDL_strdup(path ? path : "");
+    doc->source = text ? text : SDL_strdup("");
+    doc->source_len = text ? len : 0;
+    return parse(doc);
 }
 
 void document_free(Document *doc)

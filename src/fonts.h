@@ -13,6 +13,8 @@ typedef enum FontFace {
     FONT_LIGHT,
     FONT_MONO,
     FONT_MONO_ITALIC,
+    FONT_MONO_BOLD,
+    FONT_MONO_BOLD_ITALIC,
     FONT_FACE_COUNT
 } FontFace;
 

@@ -30,6 +30,8 @@ static const char *asset_path(int id)
     case ASSET_ROBOTO_MONO_ITALIC: return MD_ASSET_ROBOTO_MONO_ITALIC;
     case ASSET_NOTO_EMOJI:         return MD_ASSET_NOTO_EMOJI;
     case ASSET_NVIM_INIT:          return MD_ASSET_NVIM_INIT;
+    case ASSET_ROBOTO_MONO_BOLD:   return MD_ASSET_ROBOTO_MONO_BOLD;
+    case ASSET_ROBOTO_MONO_BOLD_ITALIC: return MD_ASSET_ROBOTO_MONO_BOLD_ITALIC;
     default:                       return NULL;
     }
 }
