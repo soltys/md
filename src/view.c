@@ -1112,6 +1112,21 @@ void view_draw_selection(View *v, SDL_Renderer *r)
     }
 }
 
+/* What separates frag i from frag i-1 in copied / searched text: a newline
+ * between blocks (and lines of code / tables), a space for soft wraps and
+ * gaps, a tab between table cells, or nothing. */
+static char frag_sep(const View *v, int i)
+{
+    const Frag *p = &v->frags[i - 1], *f = &v->frags[i];
+    BlockKind kind = v->items[f->item].block->kind;
+    if (p->item != f->item) return '\n';
+    if (SDL_fabsf(p->ay - f->ay) >= 1.0f) {
+        return kind == BLOCK_CODE || kind == BLOCK_HTML || kind == BLOCK_TABLE ? '\n' : ' ';
+    }
+    if (f->ax > p->ax + p->w + 0.5f) return kind == BLOCK_TABLE ? '\t' : ' ';
+    return 0;
+}
+
 char *view_selection_text(View *v)
 {
     if (!view_has_selection(v)) return NULL;
@@ -1123,22 +1138,10 @@ char *view_selection_text(View *v)
         const Frag *f = &v->frags[i];
         uint32_t s = i == a.frag ? a.off : 0;
         uint32_t e = i == b.frag ? b.off : f->len;
-        if (i > a.frag) {
-            const Frag *p = &v->frags[i - 1];
-            const char *sep = NULL;
-            if (p->item != f->item) sep = "\n";
-            else if (SDL_fabsf(p->ay - f->ay) >= 1.0f) {
-                bool pre = v->items[f->item].block->kind == BLOCK_CODE ||
-                           v->items[f->item].block->kind == BLOCK_HTML ||
-                           v->items[f->item].block->kind == BLOCK_TABLE;
-                sep = pre ? "\n" : " ";
-            } else if (f->ax > p->ax + p->w + 0.5f) {
-                sep = v->items[f->item].block->kind == BLOCK_TABLE ? "\t" : " ";
-            }
-            if (sep) {
-                if (len + 2 > cap) { cap *= 2; out = SDL_realloc(out, cap); }
-                out[len++] = sep[0];
-            }
+        char sep = i > a.frag ? frag_sep(v, i) : 0;
+        if (sep) {
+            if (len + 2 > cap) { cap *= 2; out = SDL_realloc(out, cap); }
+            out[len++] = sep;
         }
         if (f->img || e <= s) continue;
         size_t n = e - s;
@@ -1148,4 +1151,104 @@ char *view_selection_text(View *v)
     }
     out[len] = 0;
     return out;
+}
+
+/* ------------------------------------------------------------ search -- */
+
+SelPos view_top_pos(View *v)
+{
+    SelPos p = {0, 0};
+    for (int i = 0; i < v->frag_count; ++i) {
+        if (v->frags[i].ay + v->frags[i].h > v->scroll) { p.frag = i; break; }
+    }
+    return p;
+}
+
+static bool has_upper(const char *q)
+{
+    for (; *q; ++q) if (*q >= 'A' && *q <= 'Z') return true;
+    return false;
+}
+
+static char fold(char c, bool exact)
+{
+    return !exact && c >= 'A' && c <= 'Z' ? (char)(c + 32) : c;
+}
+
+bool view_search(View *v, const char *q, SelPos from, bool forward, bool *wrapped)
+{
+    if (wrapped) *wrapped = false;
+    size_t qlen = SDL_strlen(q);
+    if (!v->doc || qlen == 0) return false;
+    layout_until(v, v->item_count, 0); /* search the whole document */
+    if (v->frag_count == 0) return false;
+
+    /* The document's text as copy would produce it, with each frag's start. */
+    size_t *start = SDL_malloc(sizeof(size_t) * (size_t)v->frag_count);
+    size_t cap = 4096, len = 0;
+    char *text = SDL_malloc(cap);
+    for (int i = 0; i < v->frag_count; ++i) {
+        const Frag *f = &v->frags[i];
+        size_t n = f->img ? 0 : f->len;
+        if (len + n + 2 > cap) { while (len + n + 2 > cap) cap *= 2; text = SDL_realloc(text, cap); }
+        char sep = i > 0 ? frag_sep(v, i) : 0;
+        if (sep) text[len++] = sep;
+        start[i] = len;
+        SDL_memcpy(text + len, v->doc->strings + f->str, n);
+        len += n;
+    }
+
+    const bool exact = has_upper(q);
+    size_t origin = from.frag < v->frag_count ? start[from.frag] + from.off : len;
+    size_t found = SIZE_MAX;
+    /* Two passes: from the origin to the end (or start), then wrapped. */
+    for (int pass = 0; pass < 2 && found == SIZE_MAX; ++pass) {
+        if (forward) {
+            size_t a = pass == 0 ? origin : 0, b = pass == 0 ? len : SDL_min(origin + qlen, len);
+            for (size_t i = a; i + qlen <= b; ++i) {
+                size_t k = 0;
+                while (k < qlen && fold(text[i + k], exact) == fold(q[k], exact)) ++k;
+                if (k == qlen) { found = i; break; }
+            }
+        } else {
+            size_t hi = pass == 0 ? origin : len; /* matches starting before hi */
+            size_t lo = pass == 0 ? 0 : origin;
+            for (size_t i = hi; i-- > lo;) {
+                if (i + qlen > len) continue;
+                size_t k = 0;
+                while (k < qlen && fold(text[i + k], exact) == fold(q[k], exact)) ++k;
+                if (k == qlen) { found = i; break; }
+            }
+        }
+        if (found != SIZE_MAX && pass == 1 && wrapped) *wrapped = true;
+    }
+
+    if (found != SIZE_MAX) {
+        size_t e = found + qlen;
+        int fa = 0, fb = 0;
+        for (int i = 0; i < v->frag_count; ++i) {
+            if (start[i] <= found) fa = i;
+            if (start[i] < e) fb = i;
+        }
+        SelPos a = {fa, (uint32_t)(found - start[fa])};
+        if (a.off > v->frags[fa].len && fa + 1 < v->frag_count) { a.frag = fa + 1; a.off = 0; }
+        SelPos b = {fb, (uint32_t)SDL_min(e - start[fb], (size_t)v->frags[fb].len)};
+        v->sel_anchor = a;
+        v->sel_focus = b;
+        v->has_sel = true;
+        const Frag *f = &v->frags[a.frag];
+        if (f->ay < v->scroll || f->ay + f->h > v->scroll + v->height) {
+            view_scroll_to(v, f->ay - SDL_floorf(v->height / 3));
+        }
+    }
+    SDL_free(text);
+    SDL_free(start);
+    return found != SIZE_MAX;
+}
+
+SelPos view_selection_start(const View *v)
+{
+    SelPos a, b;
+    sel_range(v, &a, &b);
+    return a;
 }

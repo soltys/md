@@ -117,6 +117,14 @@ void view_select_clear(View *v);
 bool view_has_selection(const View *v);
 /* Selected text as UTF-8 (SDL_free it), NULL when nothing is selected. */
 char *view_selection_text(View *v);
+/* Start of the selection (the current search match). */
+SelPos view_selection_start(const View *v);
+
+/* Search: the first visible text position, and a search for q from `from`
+ * forwards or backwards, wrapping around. A match becomes the selection and
+ * is scrolled into view. Case-insensitive unless q has a capital letter. */
+SelPos view_top_pos(View *v);
+bool view_search(View *v, const char *q, SelPos from, bool forward, bool *wrapped);
 
 /* Centered two-line message, used for the welcome and error screens. */
 void view_draw_message(View *v, SDL_Renderer *r, const char *title, const char *body);

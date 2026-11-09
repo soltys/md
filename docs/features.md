@@ -22,6 +22,7 @@ follows as you type.
 | Mouse drag | Select text in the preview; Shift+click extends it |
 | `PgUp` / `PgDn` / `Space` / `Home` / `End` | Scroll the preview (when it has focus); the editor follows |
 | `j` / `k`, `Ctrl+d` / `Ctrl+u`, `Ctrl+f` / `Ctrl+b`, `gg` / `G` | Vim-style scrolling in the preview; counts work (`5j`, `42G` jumps to source line 42) |
+| `/` or `?`, then `n` / `N` | Search the preview forward / backward (Enter keeps the match, Esc cancels), then jump between matches |
 
 Everything else typed in the editor goes to Neovim. Closing the window asks
 Neovim to quit, so unsaved changes are never lost silently.

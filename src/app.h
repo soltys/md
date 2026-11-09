@@ -67,6 +67,15 @@ typedef struct App {
     Uint64 toast_until;  /* SDL_GetTicks() deadline */
 
     bool show_help;      /* F1 overlay */
+
+    /* Preview search: "/" or "?" then text, Enter / Esc; n / N repeat. */
+    bool searching;
+    bool search_back, search_found;
+    char search[256];
+    char last_search[256];
+    bool last_search_back;
+    SelPos search_origin;
+    float search_scroll0;
     bool dark;
     bool dirty;
     bool quitting;

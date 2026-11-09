@@ -207,8 +207,9 @@ static void relayout(void)
             }
         }
     }
-    if (app.focus == PANE_EDITOR) SDL_StartTextInput(app.window);
-    else SDL_StopTextInput(app.window);
+    /* On for both panes: the preview reads "/" and its search text as text,
+     * whatever the keyboard layout needs to type them. */
+    SDL_StartTextInput(app.window);
     app.dirty = true;
 }
 
@@ -299,6 +300,48 @@ static void show_toast_ms(const char *msg, Uint32 ms)
 static void show_toast(const char *msg) { show_toast_ms(msg, 1500); }
 
 /* A small pill centred at the bottom of the viewer (or the window). */
+/* "/query" along the bottom of the preview while typing a search. */
+static void draw_search_bar(SDL_Renderer *r)
+{
+    if (!app.searching || !app.fonts_ok || !viewer_visible()) return;
+    const float s = display_scale();
+    const Theme *th = &app.view.theme;
+    TTF_Font *font = fonts_get(FONT_MONO, 14.0f * s);
+    if (!font) return;
+    const float h = SDL_floorf(30.0f * s);
+    const SDL_FRect *vr = &app.viewer_rect;
+    SDL_FRect bar = {vr->x, vr->y + vr->h - h, vr->w, h};
+    SDL_SetRenderDrawColor(r, th->code_bg.r, th->code_bg.g, th->code_bg.b, 0xFF);
+    SDL_RenderFillRect(r, &bar);
+    SDL_SetRenderDrawColor(r, th->rule.r, th->rule.g, th->rule.b, 0xFF);
+    SDL_FRect line = {bar.x, bar.y, bar.w, SDL_max(1.0f, SDL_floorf(s))};
+    SDL_RenderFillRect(r, &line);
+
+    char buf[300];
+    SDL_snprintf(buf, sizeof buf, "%c%s", app.search_back ? '?' : '/', app.search);
+    TTF_Text *t = TTF_CreateText(app.engine, font, buf, 0);
+    if (!t) return;
+    int tw = 0, tht = 0;
+    TTF_GetTextSize(t, &tw, &tht);
+    const float x = bar.x + 12.0f * s, y = bar.y + SDL_floorf((h - (float)tht) * 0.5f);
+    TTF_SetTextColor(t, th->text.r, th->text.g, th->text.b, 0xFF);
+    TTF_DrawRendererText(t, x, y);
+    TTF_DestroyText(t);
+    SDL_FRect caret = {x + (float)tw + 1.0f, y, SDL_max(2.0f, SDL_floorf(2.0f * s)), (float)tht};
+    SDL_SetRenderDrawColor(r, th->accent.r, th->accent.g, th->accent.b, 0xFF);
+    SDL_RenderFillRect(r, &caret);
+    if (app.search[0] && !app.search_found) {
+        TTF_Text *m = TTF_CreateText(app.engine, font, "no match", 0);
+        if (m) {
+            int mw = 0, mh = 0;
+            TTF_GetTextSize(m, &mw, &mh);
+            TTF_SetTextColor(m, th->muted.r, th->muted.g, th->muted.b, 0xFF);
+            TTF_DrawRendererText(m, bar.x + bar.w - (float)mw - 12.0f * s, y);
+            TTF_DestroyText(m);
+        }
+    }
+}
+
 static void draw_toast(SDL_Renderer *r)
 {
     if (!app.toast[0] || !app.fonts_ok) return;
@@ -350,6 +393,8 @@ static const char *const HELP[][2] = {
     {"Ctrl+d / Ctrl+u", "Half a page down / up"},
     {"Ctrl+f / Ctrl+b", "A page down / up"},
     {"gg / G", "Start / end (42G: source line 42)"},
+    {"/ or ?", "Search forward / backward (Enter, Esc)"},
+    {"n / N", "Next / previous match"},
     {"Drag, Shift+click", "Select text"},
     {"Ctrl+A", "Select all"},
     {"Ctrl+C", "Copy the selection"},
@@ -461,6 +506,7 @@ static void render(void)
         }
         SDL_SetRenderViewport(r, NULL);
     }
+    draw_search_bar(r);
     draw_help(r);
     draw_toast(r);
     SDL_RenderPresent(r);
@@ -561,6 +607,107 @@ static void editor_text(const char *text)
     nvim_input(&app.nvim, buf);
 }
 
+/* ------------------------------------------------------------ search -- */
+
+static void search_begin(bool backward)
+{
+    if (!app.view.doc) return;
+    app.searching = true;
+    app.search_back = backward;
+    app.search[0] = '\0';
+    app.search_found = false;
+    app.search_origin = view_top_pos(&app.view);
+    app.search_scroll0 = app.view.scroll;
+    app.dirty = true;
+}
+
+/* Incremental: every change searches again from where the search began. */
+static void search_update(void)
+{
+    if (app.search[0] &&
+        view_search(&app.view, app.search, app.search_origin, !app.search_back, NULL)) {
+        app.search_found = true;
+    } else {
+        app.search_found = false;
+        view_select_clear(&app.view);
+        view_scroll_to(&app.view, app.search_scroll0);
+    }
+    app.viewer_scrolled = true;
+    app.dirty = true;
+}
+
+static void search_end(bool keep)
+{
+    app.searching = false;
+    if (keep && app.search[0]) {
+        SDL_strlcpy(app.last_search, app.search, sizeof app.last_search);
+        app.last_search_back = app.search_back;
+        if (!app.search_found) {
+            char msg[300];
+            SDL_snprintf(msg, sizeof msg, "Not found: %s", app.search);
+            show_toast(msg);
+        }
+    } else {
+        view_select_clear(&app.view);
+        view_scroll_to(&app.view, app.search_scroll0);
+        app.viewer_scrolled = true;
+    }
+    app.dirty = true;
+}
+
+/* n / N: the next match in the search's direction, or against it. */
+static void search_next(bool reverse)
+{
+    if (!app.last_search[0]) return;
+    const bool forward = app.last_search_back == reverse;
+    SelPos from;
+    if (view_has_selection(&app.view)) {
+        from = view_selection_start(&app.view);
+        if (forward) from.off += 1; /* past the current match */
+    } else {
+        from = view_top_pos(&app.view);
+    }
+    bool wrapped = false;
+    if (view_search(&app.view, app.last_search, from, forward, &wrapped)) {
+        if (wrapped) show_toast(forward ? "Search hit bottom, continuing at top"
+                                        : "Search hit top, continuing at bottom");
+    } else {
+        char msg[300];
+        SDL_snprintf(msg, sizeof msg, "Not found: %s", app.last_search);
+        show_toast(msg);
+    }
+    app.viewer_scrolled = true;
+    app.dirty = true;
+}
+
+static void search_key(const SDL_KeyboardEvent *k)
+{
+    switch (k->key) {
+    case SDLK_ESCAPE:
+        search_end(false);
+        break;
+    case SDLK_RETURN: case SDLK_KP_ENTER:
+        search_end(true);
+        break;
+    case SDLK_BACKSPACE: {
+        size_t n = SDL_strlen(app.search);
+        if (n == 0) { search_end(false); break; }
+        while (n > 0 && ((unsigned char)app.search[n - 1] & 0xC0) == 0x80) --n; /* UTF-8 */
+        app.search[n > 0 ? n - 1 : 0] = '\0';
+        search_update();
+        break;
+    }
+    default:
+        break; /* the text arrives as SDL_EVENT_TEXT_INPUT */
+    }
+}
+
+static void search_text(const char *text)
+{
+    SDL_strlcat(app.search, text, sizeof app.search);
+    search_update();
+}
+
 /* Vim-style keys for the preview: [count]j/k, gg, [count]G, Ctrl+d/u
  * (half page), Ctrl+f/b (page). Counts are typed as digits first. */
 static void viewer_key(const SDL_KeyboardEvent *k)
@@ -592,6 +739,10 @@ static void viewer_key(const SDL_KeyboardEvent *k)
     case SDLK_SPACE:    view_scroll_by(v, shift ? -page : page); break;
     case SDLK_HOME:     view_scroll_to(v, 0); break;
     case SDLK_END:      view_scroll_to_end(v); break;
+    case SDLK_N:
+        if (ctrl || alt) return;
+        search_next(shift);
+        return;
     case SDLK_J:
         if (ctrl || alt) return;
         view_scroll_by(v, (float)n * line);
@@ -889,6 +1040,10 @@ static bool handle_event(const SDL_Event *e)
             }
             break;
         }
+        if (app.searching) {
+            search_key(&e->key);
+            break;
+        }
         if (app_shortcut(&e->key)) break;
         if ((e->key.mod & SDL_KMOD_CTRL) && !(e->key.mod & SDL_KMOD_RALT) &&
             (e->key.key == SDLK_Q) && app.focus == PANE_VIEWER) {
@@ -900,6 +1055,15 @@ static bool handle_event(const SDL_Event *e)
         break;
     case SDL_EVENT_TEXT_INPUT:
         if (app.show_help) break;
+        if (app.searching) {
+            search_text(e->text.text);
+            break;
+        }
+        if (app.focus == PANE_VIEWER || !app.nvim_ok) {
+            if (SDL_strcmp(e->text.text, "/") == 0) search_begin(false);
+            else if (SDL_strcmp(e->text.text, "?") == 0) search_begin(true);
+            break;
+        }
         if (app.focus == PANE_EDITOR && app.nvim_ok) editor_text(e->text.text);
         break;
     case SDL_EVENT_MOUSE_WHEEL: {
