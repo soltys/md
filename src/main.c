@@ -192,6 +192,11 @@ static void relayout(void)
 
     if (app.fonts_ok) {
         view_layout(&app.view, app.viewer_rect.w, app.viewer_rect.h, scale);
+        /* A new size re-wraps both panes differently: line the preview up
+         * with the editor again rather than keeping its old pixel offset. */
+        if (editor_visible() && viewer_visible() && app.nvim.attached && app.nvim.top_line > 0) {
+            view_scroll_to_line(&app.view, app.nvim.top_line);
+        }
         if (app.nvim_ok) {
             editor_set_scale(&app.editor, scale);
             int cols, rows;

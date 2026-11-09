@@ -761,7 +761,7 @@ int view_top_line(const View *v)
     float h = item_height(it);
     int lines = block_lines(v->doc, it->block);
     float frac = h > 0 ? (y - item_top(it)) / h : 0;
-    int into = frac <= 0 ? 0 : (int)(frac * (float)lines);
+    int into = frac <= 0 ? 0 : (int)(frac * (float)lines + 0.01f); /* round-trips view_scroll_to_line */
     if (into >= lines) into = lines; /* the gap after the block: next line */
     return (int)it->block->src_line + into;
 }
