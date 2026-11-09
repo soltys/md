@@ -18,7 +18,8 @@ follows as you type.
 | `Ctrl+O` | Open a file (when the preview has focus) |
 | `Ctrl+Q` | Quit (when the preview has focus) |
 | `Ctrl+A` | Select all text in the preview |
-| `Ctrl+C` | Copy the selected text (shows "Copied N characters") |
+| `Ctrl+C` | Copy the selection as rich text: pasting into Word, Outlook or a browser keeps headings, lists, links, tables and code colours |
+| `Ctrl+Shift+C` | Copy the selection as plain text |
 | Mouse drag | Select text in the preview; Shift+click extends it |
 | `PgUp` / `PgDn` / `Space` / `Home` / `End` | Scroll the preview (when it has focus); the editor follows |
 | `j` / `k`, `Ctrl+d` / `Ctrl+u`, `Ctrl+f` / `Ctrl+b`, `gg` / `G` | Vim-style scrolling in the preview; counts work (`5j`, `42G` jumps to source line 42) |

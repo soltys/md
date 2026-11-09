@@ -14,6 +14,7 @@
 #include <SDL3_ttf/SDL_ttf.h>
 
 #include "app.h"
+#include "clipboard.h"
 #include "document.h"
 #include "editor.h"
 #include "fonts.h"
@@ -397,7 +398,8 @@ static const char *const HELP[][2] = {
     {"n / N", "Next / previous match"},
     {"Drag, Shift+click", "Select text"},
     {"Ctrl+A", "Select all"},
-    {"Ctrl+C", "Copy the selection"},
+    {"Ctrl+C", "Copy as rich text (formatting, links, code)"},
+    {"Ctrl+Shift+C", "Copy as plain text"},
     {"Click a link", "Open it (.md files open in md)"},
 };
 
@@ -820,7 +822,9 @@ static void set_layout(Layout layout)
     relayout();
 }
 
-static void copy_selection(void)
+/* Ctrl+C: rich text (HTML, plus plain text for apps without formatting).
+ * Ctrl+Shift+C: plain text only. */
+static void copy_selection(bool rich)
 {
     char *text = view_selection_text(&app.view);
     if (!text || !text[0]) {
@@ -832,13 +836,19 @@ static void copy_selection(void)
     for (const unsigned char *p = (const unsigned char *)text; *p; ++p) {
         if ((*p & 0xC0) != 0x80) ++chars;
     }
-    char msg[96];
-    if (SDL_SetClipboardText(text)) {
-        SDL_snprintf(msg, sizeof msg, "Copied %zu character%s", chars, chars == 1 ? "" : "s");
+    bool ok;
+    char *html = rich ? view_selection_html(&app.view) : NULL;
+    if (html) ok = clipboard_set_rich(app.window, html, text);
+    else ok = SDL_SetClipboardText(text);
+    char msg[128];
+    if (ok) {
+        SDL_snprintf(msg, sizeof msg, "Copied %zu character%s%s", chars, chars == 1 ? "" : "s",
+                     html ? " as rich text" : " as plain text");
     } else {
         SDL_snprintf(msg, sizeof msg, "Could not copy: %s", SDL_GetError());
     }
     show_toast(msg);
+    SDL_free(html);
     SDL_free(text);
 }
 
@@ -861,13 +871,17 @@ static bool app_shortcut(const SDL_KeyboardEvent *k)
             return true;
         case SDLK_C:
         case SDLK_INSERT:
-            copy_selection();
+            copy_selection(true);
             return true;
         default:
             return false;
         }
     }
     switch (k->key) {
+    case SDLK_C: /* copy the preview selection as plain text */
+        if (app.focus != PANE_VIEWER) return false;
+        copy_selection(false);
+        return true;
     case SDLK_X: /* swap which side the editor is on */
         app.editor_second = !app.editor_second;
         relayout();

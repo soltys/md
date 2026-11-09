@@ -117,6 +117,9 @@ void view_select_clear(View *v);
 bool view_has_selection(const View *v);
 /* Selected text as UTF-8 (SDL_free it), NULL when nothing is selected. */
 char *view_selection_text(View *v);
+/* The selection as an HTML fragment (headings, lists, emphasis, links,
+ * code with its colours, tables), for rich-text paste. SDL_free it. */
+char *view_selection_html(View *v);
 /* Start of the selection (the current search match). */
 SelPos view_selection_start(const View *v);
 

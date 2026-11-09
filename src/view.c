@@ -1252,3 +1252,235 @@ SelPos view_selection_start(const View *v)
     sel_range(v, &a, &b);
     return a;
 }
+
+/* ---------------------------------------------------------- rich copy -- */
+
+typedef struct Str { char *p; size_t len, cap; } Str;
+
+static void str_put(Str *s, const char *t, size_t n)
+{
+    if (s->len + n + 1 > s->cap) {
+        while (s->len + n + 1 > s->cap) s->cap = s->cap ? s->cap * 2 : 1024;
+        s->p = SDL_realloc(s->p, s->cap);
+    }
+    SDL_memcpy(s->p + s->len, t, n);
+    s->len += n;
+    s->p[s->len] = 0;
+}
+
+static void str_cat(Str *s, const char *t) { str_put(s, t, SDL_strlen(t)); }
+
+static void str_esc(Str *s, const char *t, size_t n)
+{
+    for (size_t i = 0; i < n; ++i) {
+        switch (t[i]) {
+        case '<': str_cat(s, "&lt;"); break;
+        case '>': str_cat(s, "&gt;"); break;
+        case '&': str_cat(s, "&amp;"); break;
+        case '"': str_cat(s, "&quot;"); break;
+        default: str_put(s, t + i, 1); break;
+        }
+    }
+}
+
+static bool in_para(const Para *p, int i) { return i >= p->first && i < p->first + p->count; }
+
+/* Which table cell (index into the item's cells) holds frag i, or -1. */
+static int frag_cell(const ViewItem *it, int i)
+{
+    if (!it->cells) return -1;
+    for (uint32_t c = 0; c < it->block->cell_count; ++c) {
+        if (in_para(&it->cells[c].para, i)) return (int)c;
+    }
+    return -1;
+}
+
+typedef struct HtmlState {
+    Str s;
+    const View *v;
+    int quote;              /* open <blockquote>s */
+    int lists;              /* open <ul>/<ol>s */
+    char list_kind[16];     /* 'u' or 'o' per depth */
+    bool li_open[16];
+    const char *block_close;
+    int cell, row;          /* tables */
+} HtmlState;
+
+static void html_close_block(HtmlState *h)
+{
+    if (h->cell >= 0) {
+        str_cat(&h->s, h->row == 0 ? "</th></tr>" : "</td></tr>");
+        h->cell = -1;
+    }
+    if (h->block_close) str_cat(&h->s, h->block_close);
+    h->block_close = NULL;
+}
+
+static void html_close_lists(HtmlState *h, int depth)
+{
+    while (h->lists > depth) {
+        if (h->li_open[h->lists]) str_cat(&h->s, "</li>");
+        h->li_open[h->lists] = false;
+        str_cat(&h->s, h->list_kind[h->lists] == 'o' ? "</ol>" : "</ul>");
+        --h->lists;
+    }
+}
+
+static void html_open_block(HtmlState *h, const ViewItem *it, bool first_in_selection)
+{
+    const Block *b = it->block;
+    const Document *doc = h->v->doc;
+    int depth = SDL_min((int)b->list_depth, 15);
+    int quote = b->quote_depth;
+    bool marker = b->marker_len > 0;
+
+    if (quote != h->quote) html_close_lists(h, 0);
+    while (h->quote > quote) { str_cat(&h->s, "</blockquote>"); --h->quote; }
+    while (h->quote < quote) { str_cat(&h->s, "<blockquote>"); ++h->quote; }
+
+    html_close_lists(h, depth);
+    if (depth > 0 && (marker || h->lists < depth || first_in_selection)) {
+        const char *m = doc->strings + b->marker;
+        char kind = marker && b->marker_len > 0 &&
+                    (m[b->marker_len - 1] == '.' || m[b->marker_len - 1] == ')') ? 'o' : 'u';
+        if (h->lists == depth && h->list_kind[depth] != kind) html_close_lists(h, depth - 1);
+        if (h->lists == depth && h->li_open[depth]) { str_cat(&h->s, "</li>"); h->li_open[depth] = false; }
+        while (h->lists < depth) {
+            ++h->lists;
+            h->list_kind[h->lists] = kind;
+            h->li_open[h->lists] = false;
+            str_cat(&h->s, kind == 'o' ? "<ol>" : "<ul>");
+        }
+        str_cat(&h->s, "<li>");
+        h->li_open[depth] = true;
+        if (b->task == TASK_CHECKED) str_cat(&h->s, "\xE2\x98\x91 ");      /* ☑ */
+        else if (b->task == TASK_UNCHECKED) str_cat(&h->s, "\xE2\x98\x90 "); /* ☐ */
+        if (b->kind == BLOCK_PARAGRAPH) return; /* the item's text goes straight in */
+    }
+
+    switch (b->kind) {
+    case BLOCK_HEADING: {
+        char tag[8];
+        SDL_snprintf(tag, sizeof tag, "<h%d>", SDL_clamp((int)b->level, 1, 6));
+        str_cat(&h->s, tag);
+        h->block_close = b->level == 1 ? "</h1>" : b->level == 2 ? "</h2>" : b->level == 3 ? "</h3>"
+                       : b->level == 4 ? "</h4>" : b->level == 5 ? "</h5>" : "</h6>";
+        break;
+    }
+    case BLOCK_CODE:
+    case BLOCK_HTML:
+    {
+        /* The colours of the current theme, so highlighted code stays readable. */
+        char pre[96];
+        const Theme *th = &h->v->theme;
+        SDL_snprintf(pre, sizeof pre, "<pre style=\"background:#%02x%02x%02x;color:#%02x%02x%02x;padding:8px\"><code>",
+                     th->code_bg.r, th->code_bg.g, th->code_bg.b, th->code_text.r, th->code_text.g, th->code_text.b);
+        str_cat(&h->s, pre);
+    }
+        h->block_close = "</code></pre>";
+        break;
+    case BLOCK_TABLE:
+        str_cat(&h->s, "<table border=\"1\" cellspacing=\"0\" cellpadding=\"4\">");
+        h->block_close = "</table>";
+        h->cell = -1;
+        h->row = -1;
+        break;
+    case BLOCK_RULE:
+        str_cat(&h->s, "<hr>");
+        break;
+    default:
+        str_cat(&h->s, "<p>");
+        h->block_close = "</p>";
+        break;
+    }
+}
+
+static void html_frag(HtmlState *h, const Frag *f, uint32_t s, uint32_t e, bool pre)
+{
+    const Document *doc = h->v->doc;
+    if (f->img || (f->style & ST_IMAGE)) {
+        str_cat(&h->s, "<img alt=\"");
+        str_esc(&h->s, doc->strings + f->str, f->len);
+        str_cat(&h->s, "\" src=\"");
+        str_esc(&h->s, doc->strings + f->url, f->url_len);
+        str_cat(&h->s, "\">");
+        return;
+    }
+    if (e <= s) return;
+    const char *t = doc->strings + f->str + s;
+    size_t n = e - s;
+    if (pre) {
+        char span[48];
+        SDL_snprintf(span, sizeof span, "<span style=\"color:#%02x%02x%02x\">",
+                     f->color.r, f->color.g, f->color.b);
+        str_cat(&h->s, span);
+        str_esc(&h->s, t, n);
+        str_cat(&h->s, "</span>");
+        return;
+    }
+    if (f->url_len) {
+        str_cat(&h->s, "<a href=\"");
+        str_esc(&h->s, doc->strings + f->url, f->url_len);
+        str_cat(&h->s, "\">");
+    }
+    if (f->style & ST_BOLD) str_cat(&h->s, "<strong>");
+    if (f->style & ST_ITALIC) str_cat(&h->s, "<em>");
+    if (f->style & ST_STRIKE) str_cat(&h->s, "<del>");
+    if (f->style & ST_CODE) str_cat(&h->s, "<code>");
+    str_esc(&h->s, t, n);
+    if (f->style & ST_CODE) str_cat(&h->s, "</code>");
+    if (f->style & ST_STRIKE) str_cat(&h->s, "</del>");
+    if (f->style & ST_ITALIC) str_cat(&h->s, "</em>");
+    if (f->style & ST_BOLD) str_cat(&h->s, "</strong>");
+    if (f->url_len) str_cat(&h->s, "</a>");
+}
+
+char *view_selection_html(View *v)
+{
+    if (!view_has_selection(v)) return NULL;
+    SelPos a, b;
+    sel_range(v, &a, &b);
+    HtmlState h;
+    SDL_zero(h);
+    h.v = v;
+    h.cell = -1;
+    int cur = -1;
+    for (int i = a.frag; i <= b.frag && i < v->frag_count; ++i) {
+        const Frag *f = &v->frags[i];
+        const ViewItem *it = &v->items[f->item];
+        if (in_para(&it->marker, i) || in_para(&it->lang, i)) continue; /* tags say it */
+        const bool pre = it->block->kind == BLOCK_CODE || it->block->kind == BLOCK_HTML;
+        if (f->item != cur) {
+            if (cur >= 0) html_close_block(&h);
+            html_open_block(&h, it, cur < 0);
+            cur = f->item;
+        } else {
+            char sep = frag_sep(v, i);
+            if (it->block->kind != BLOCK_TABLE && sep) str_cat(&h.s, pre && sep == '\n' ? "\n" : " ");
+        }
+        if (it->block->kind == BLOCK_TABLE) {
+            int c = frag_cell(it, i);
+            if (c >= 0 && c != h.cell) {
+                const TableCell *tc = &v->doc->cells[it->block->cell_first + (uint32_t)c];
+                bool new_row = h.cell < 0 || tc->row != h.row;
+                if (h.cell >= 0) str_cat(&h.s, h.row == 0 ? "</th>" : "</td>");
+                if (new_row) {
+                    if (h.cell >= 0) str_cat(&h.s, "</tr>");
+                    str_cat(&h.s, "<tr>");
+                }
+                str_cat(&h.s, tc->row == 0 ? "<th>" : "<td>");
+                h.cell = c;
+                h.row = tc->row;
+            } else if (c == h.cell && i > a.frag && frag_sep(v, i)) {
+                str_cat(&h.s, " ");
+            }
+        }
+        uint32_t s = i == a.frag ? a.off : 0;
+        uint32_t e = i == b.frag ? b.off : f->len;
+        html_frag(&h, f, s, e, pre);
+    }
+    if (cur >= 0) html_close_block(&h);
+    html_close_lists(&h, 0);
+    while (h.quote > 0) { str_cat(&h.s, "</blockquote>"); --h.quote; }
+    return h.s.p;
+}

@@ -47,6 +47,8 @@ add_executable(md WIN32
     src/msgpack.h
     src/editor.c
     src/editor.h
+    src/clipboard.c
+    src/clipboard.h
     src/emoji.c
     src/emoji.h
     src/images.c
