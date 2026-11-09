@@ -310,9 +310,10 @@ static void draw_toast(SDL_Renderer *r)
     TTF_GetTextSize(text, &tw, &th);
     const SDL_FRect *area = app.viewer_rect.w > 0 ? &app.viewer_rect : &app.editor_rect;
     float pad_x = 16 * scale, pad_y = 8 * scale;
-    SDL_FRect box = {area->x + SDL_floorf((area->w - tw) * 0.5f) - pad_x,
-                     area->y + area->h - th - 2 * pad_y - 24 * scale,
-                     tw + 2 * pad_x, th + 2 * pad_y};
+    const float w = (float)tw, h = (float)th;
+    SDL_FRect box = {area->x + SDL_floorf((area->w - w) * 0.5f) - pad_x,
+                     area->y + area->h - h - 2 * pad_y - 24 * scale,
+                     w + 2 * pad_x, h + 2 * pad_y};
     SDL_SetRenderDrawBlendMode(r, SDL_BLENDMODE_BLEND);
     if (app.dark) SDL_SetRenderDrawColor(r, 0xE6, 0xE6, 0xEA, 0xF0);
     else SDL_SetRenderDrawColor(r, 0x24, 0x27, 0x2E, 0xF0);

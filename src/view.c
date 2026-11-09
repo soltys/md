@@ -882,7 +882,7 @@ void view_draw(View *v, SDL_Renderer *r)
 
         for (int q = 0; q < b->quote_depth; ++q) {
             float qx = SDL_floorf((v->width - SDL_min(MAX_WIDTH * s, v->width - 2 * MARGIN * s)) * 0.5f)
-                       + b->list_depth * LIST_INDENT * s + q * QUOTE_INDENT * s;
+                       + (float)b->list_depth * LIST_INDENT * s + (float)q * QUOTE_INDENT * s;
             SDL_FRect bar = {qx, y0 + dy - 4 * s, 4 * s, (y1 - y0) + 8 * s + 10 * s};
             set_color(r, th->quote_bar);
             SDL_RenderFillRect(r, &bar);
@@ -974,6 +974,7 @@ bool view_link_at(View *v, float x, float y, const char **url, size_t *len)
 
 void view_draw_message(View *v, SDL_Renderer *r, const char *title, const char *body)
 {
+    (void)r; /* drawn through the text engine, which knows the renderer */
     const float s = v->scale;
     TTF_Font *tf = fonts_get(FONT_LIGHT, 30 * s);
     TTF_Font *bf = fonts_get(FONT_REGULAR, 15 * s);
