@@ -68,6 +68,16 @@
         {
             "name": "ninja-debug",
             "configurePreset": "ninja-debug"
+        },
+        {
+            "name": "install",
+            "displayName": "Install (Release)",
+            "description": "Builds Release and installs md.exe to CMAKE_INSTALL_PREFIX (default %LOCALAPPDATA%/Programs/md/bin)",
+            "configurePreset": "vs2026",
+            "configuration": "Release",
+            "targets": [
+                "install"
+            ]
         }
     ],
     "workflowPresets": [

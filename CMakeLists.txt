@@ -113,6 +113,17 @@ else()
     target_compile_options(md PRIVATE -Wall -Wextra -Wno-unused-parameter)
 endif()
 
+# Install: md.exe is self-contained (fonts and the Neovim config are
+# embedded), so installing is copying one file. Defaults to a per-user
+# folder that needs no admin rights: %LOCALAPPDATA%\Programs\md\bin.
+#   cmake --build --preset release --target install
+#   cmake --install build/vs2026 --config Release [--prefix <dir>]
+if(WIN32 AND CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT AND DEFINED ENV{LOCALAPPDATA})
+    file(TO_CMAKE_PATH "$ENV{LOCALAPPDATA}/Programs/md" _md_prefix)
+    set(CMAKE_INSTALL_PREFIX "${_md_prefix}" CACHE PATH "Install location" FORCE)
+endif()
+install(TARGETS md RUNTIME DESTINATION bin)
+
 # Companion tools, each its own executable.
 option(MD_BUILD_TOOLS "Build the companion tools (pixelart.exe)" ON)
 if(MD_BUILD_TOOLS)

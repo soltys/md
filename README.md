@@ -53,6 +53,21 @@ build\ninja-release\md.exe README.md
 | `ninja-release` | Ninja, MSVC `cl` | `build/ninja-release/md.exe` |
 | `ninja-debug` | Ninja, MSVC `cl` | `build/ninja-debug/md.exe` |
 
+### Installing
+
+md.exe is self-contained, so installing copies that one file. The default
+location is per user and needs no admin rights:
+`%LOCALAPPDATA%\Programs\md\bin\md.exe` (add that folder to `PATH`).
+
+```bat
+cmake --preset vs2026
+cmake --build --preset install
+:: or another location:
+cmake --install build\vs2026 --config Release --prefix C:\Tools\md
+```
+
+Changing `CMAKE_INSTALL_PREFIX` when configuring also changes the default.
+
 ## ![](art/png/keyboard@3x.png) Usage
 
 ```
