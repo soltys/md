@@ -15,10 +15,12 @@
 #include "app.h"
 #include "document.h"
 #include "fonts.h"
+#include "nvim.h"
 #include "theme.h"
 #include "view.h"
 
 static App app;
+static Nvim nvim;
 
 /* ----------------------------------------------------------- workers -- */
 
@@ -219,6 +221,7 @@ int main(int argc, char **argv)
     /* 1. Kick off background work before touching the window system. */
     app.font_thread = SDL_CreateThread(font_thread_main, "md-fonts", NULL);
     if (argc > 1) start_load(argv[1]);
+    nvim_start_async(&nvim, argc > 1 ? argv[1] : NULL);
 
     /* 2. Window + renderer. */
     SDL_SetHint(SDL_HINT_RENDER_VSYNC, "1");
@@ -274,6 +277,7 @@ int main(int argc, char **argv)
         if (running && app.dirty) render();
     }
 
+    nvim_stop(&nvim);
     view_destroy(&app.view);
     document_free(SDL_SetAtomicPointer(&app.loaded_doc, NULL));
     if (app.engine) TTF_DestroyRendererTextEngine(app.engine);

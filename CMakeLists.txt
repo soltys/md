@@ -40,7 +40,12 @@ add_executable(md WIN32
     src/view.c
     src/view.h
     src/theme.h
+    src/nvim.c
+    src/nvim.h
 )
+
+# Neovim config for the editor pane, embedded like the fonts.
+set(MD_NVIM_INIT "${CMAKE_CURRENT_SOURCE_DIR}/nvim/init.lua")
 
 target_include_directories(md PRIVATE src "${CMAKE_CURRENT_BINARY_DIR}/generated")
 target_link_libraries(md PRIVATE
@@ -57,6 +62,9 @@ if(WIN32)
     # they are reached through LockResource(), i.e. straight out of the mapped
     # image with no copy and no file I/O.
     configure_file(src/assets.rc.in "${CMAKE_CURRENT_BINARY_DIR}/generated/assets.rc" @ONLY)
+    # rc.exe does not track RCDATA inputs; rebuild when any of them changes.
+    set_source_files_properties("${CMAKE_CURRENT_BINARY_DIR}/generated/assets.rc" PROPERTIES
+        OBJECT_DEPENDS "${MD_FONT_ROBOTO_REGULAR};${MD_FONT_ROBOTO_ITALIC};${MD_FONT_ROBOTO_MEDIUM};${MD_FONT_ROBOTO_BOLD};${MD_FONT_ROBOTO_BOLD_ITALIC};${MD_FONT_ROBOTO_LIGHT};${MD_FONT_ROBOTO_MONO};${MD_FONT_ROBOTO_MONO_ITALIC};${MD_FONT_NOTO_EMOJI};${MD_NVIM_INIT}")
     target_sources(md PRIVATE
         "${CMAKE_CURRENT_BINARY_DIR}/generated/assets.rc"
         src/md.manifest)
@@ -71,7 +79,8 @@ else()
         MD_ASSET_ROBOTO_LIGHT="${MD_FONT_ROBOTO_LIGHT}"
         MD_ASSET_ROBOTO_MONO="${MD_FONT_ROBOTO_MONO}"
         MD_ASSET_ROBOTO_MONO_ITALIC="${MD_FONT_ROBOTO_MONO_ITALIC}"
-        MD_ASSET_NOTO_EMOJI="${MD_FONT_NOTO_EMOJI}")
+        MD_ASSET_NOTO_EMOJI="${MD_FONT_NOTO_EMOJI}"
+        MD_ASSET_NVIM_INIT="${MD_NVIM_INIT}")
 endif()
 
 if(MSVC)
