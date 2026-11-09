@@ -56,7 +56,8 @@ build\ninja-release\md.exe README.md
 ### Installing
 
 md.exe is self-contained, so installing copies that one file. The default
-location is the current user's `Documents\PathApps\md.exe` (put
+location is the current user's `Documents\PathApps`, as both `md.exe` and
+`mdv.exe` (the same program under a second name; put
 `Documents\PathApps` on `PATH` once and every app installed there runs from
 anywhere). Documents is looked up from Windows, so a OneDrive-redirected
 Documents folder works.

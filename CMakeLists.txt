@@ -142,10 +142,13 @@ if(WIN32)
             set(CMAKE_INSTALL_PREFIX "${_md_prefix}" CACHE PATH "Install location" FORCE)
         endif()
     endif()
-    message(STATUS "md.exe installs to ${CMAKE_INSTALL_PREFIX}")
+    message(STATUS "md.exe and mdv.exe install to ${CMAKE_INSTALL_PREFIX}")
     install(TARGETS md RUNTIME DESTINATION .)
+    # The same program a second time, as mdv.exe (a short name for viewing).
+    install(PROGRAMS $<TARGET_FILE:md> DESTINATION . RENAME mdv.exe)
 else()
     install(TARGETS md RUNTIME DESTINATION bin)
+    install(PROGRAMS $<TARGET_FILE:md> DESTINATION bin RENAME mdv)
 endif()
 
 # Companion tools, each its own executable.
