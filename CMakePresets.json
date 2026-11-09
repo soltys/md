@@ -1,53 +1,89 @@
 {
-  "version": 10,
-  "cmakeMinimumRequired": { "major": 4, "minor": 0, "patch": 0 },
-  "configurePresets": [
-    {
-      "name": "vs2026",
-      "displayName": "Visual Studio 18 2026 (x64)",
-      "description": "Default: multi-config Visual Studio 2026 solution",
-      "generator": "Visual Studio 18 2026",
-      "architecture": "x64",
-      "binaryDir": "${sourceDir}/build/vs2026",
-      "cacheVariables": {
-        "CMAKE_VS_GLOBALS": "VcpkgEnabled=false;VcpkgEnableManifest=false"
-      },
-      "condition": { "type": "equals", "lhs": "${hostSystemName}", "rhs": "Windows" }
+    "version": 10,
+    "cmakeMinimumRequired": {
+        "major": 4,
+        "minor": 0,
+        "patch": 0
     },
-    {
-      "name": "ninja-release",
-      "displayName": "Ninja Release (x64, Developer Command Prompt)",
-      "generator": "Ninja",
-      "binaryDir": "${sourceDir}/build/ninja-release",
-      "cacheVariables": {
-        "CMAKE_BUILD_TYPE": "Release",
-        "CMAKE_C_COMPILER": "cl",
-        "CMAKE_CXX_COMPILER": "cl"
-      },
-      "condition": { "type": "equals", "lhs": "${hostSystemName}", "rhs": "Windows" }
-    },
-    {
-      "name": "ninja-debug",
-      "displayName": "Ninja Debug (x64, Developer Command Prompt)",
-      "inherits": "ninja-release",
-      "binaryDir": "${sourceDir}/build/ninja-debug",
-      "cacheVariables": { "CMAKE_BUILD_TYPE": "Debug" }
-    }
-  ],
-  "buildPresets": [
-    { "name": "release", "displayName": "Release", "configurePreset": "vs2026", "configuration": "Release" },
-    { "name": "debug", "displayName": "Debug", "configurePreset": "vs2026", "configuration": "Debug" },
-    { "name": "ninja-release", "configurePreset": "ninja-release" },
-    { "name": "ninja-debug", "configurePreset": "ninja-debug" }
-  ],
-  "workflowPresets": [
-    {
-      "name": "default",
-      "displayName": "Configure and build Release with Visual Studio 2026",
-      "steps": [
-        { "type": "configure", "name": "vs2026" },
-        { "type": "build", "name": "release" }
-      ]
-    }
-  ]
+    "configurePresets": [
+        {
+            "name": "vs2026",
+            "displayName": "Visual Studio 18 2026 (x64)",
+            "description": "Default: multi-config Visual Studio 2026 solution",
+            "generator": "Visual Studio 18 2026",
+            "architecture": "x64",
+            "binaryDir": "${sourceDir}/build/vs2026",
+            "cacheVariables": {
+                "CMAKE_VS_GLOBALS": "VcpkgEnabled=false;VcpkgEnableManifest=false"
+            },
+            "condition": {
+                "type": "equals",
+                "lhs": "${hostSystemName}",
+                "rhs": "Windows"
+            }
+        },
+        {
+            "name": "ninja-release",
+            "displayName": "Ninja Release (x64, Developer Command Prompt)",
+            "generator": "Ninja",
+            "binaryDir": "${sourceDir}/build/ninja-release",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Release",
+                "CMAKE_C_COMPILER": "cl",
+                "CMAKE_CXX_COMPILER": "cl"
+            },
+            "condition": {
+                "type": "equals",
+                "lhs": "${hostSystemName}",
+                "rhs": "Windows"
+            }
+        },
+        {
+            "name": "ninja-debug",
+            "displayName": "Ninja Debug (x64, Developer Command Prompt)",
+            "inherits": "ninja-release",
+            "binaryDir": "${sourceDir}/build/ninja-debug",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Debug"
+            }
+        }
+    ],
+    "buildPresets": [
+        {
+            "name": "release",
+            "displayName": "Release",
+            "configurePreset": "vs2026",
+            "configuration": "Release"
+        },
+        {
+            "name": "debug",
+            "displayName": "Debug",
+            "configurePreset": "vs2026",
+            "configuration": "Debug"
+        },
+        {
+            "name": "ninja-release",
+            "configurePreset": "ninja-release"
+        },
+        {
+            "name": "ninja-debug",
+            "configurePreset": "ninja-debug"
+        }
+    ],
+    "workflowPresets": [
+        {
+            "name": "default",
+            "displayName": "Configure and build Release with Visual Studio 2026",
+            "steps": [
+                {
+                    "type": "configure",
+                    "name": "vs2026"
+                },
+                {
+                    "type": "build",
+                    "name": "release"
+                }
+            ]
+        }
+    ]
 }
