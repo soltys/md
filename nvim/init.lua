@@ -9,7 +9,10 @@
 
 -- Options ------------------------------------------------------------------
 vim.o.termguicolors = true
+vim.o.background = "dark"
 vim.o.number = true
+vim.o.cursorline = true
+vim.o.cursorlineopt = "number"  -- highlight only the current line number
 vim.o.wrap = true
 vim.o.linebreak = true       -- wrap at word boundaries (prose)
 vim.o.breakindent = true
@@ -30,11 +33,26 @@ vim.pack.add({
 local ok, catppuccin = pcall(require, "catppuccin")
 if ok then
   catppuccin.setup({
-    flavour = "auto",                          -- follows 'background'
-    background = { light = "latte", dark = "mocha" },
+    flavour = "mocha",
+    -- Stay on Mocha even if the UI/terminal reports a light background.
+    background = { light = "mocha", dark = "mocha" },
     integrations = {},                         -- no other plugins to theme
+    highlight_overrides = {
+      frappe = function(frappe)
+        return {
+          LineNr = { fg = frappe.text },
+          CursorLineNr = { fg = frappe.red },
+        }
+      end,
+      mocha = function(mocha)
+        return {
+          LineNr = { fg = mocha.text },
+          CursorLineNr = { fg = mocha.red },
+        }
+      end,
+    },
   })
-  vim.cmd.colorscheme("catppuccin")
+  vim.cmd.colorscheme("catppuccin-mocha")
 else
   -- Offline on first run: fall back to the built-in scheme.
   vim.cmd.colorscheme("default")

@@ -68,11 +68,18 @@ You can also drop a file on the window or press **Ctrl+O**.
 `nvim/init.lua` is the editor config for the embedded Neovim pane (Neovim
 0.12+). It sets a few prose-friendly options and installs the
 [catppuccin](https://github.com/catppuccin/nvim) colorscheme through the
-built-in `vim.pack` (Latte for light backgrounds, Mocha for dark). To try it on
-its own without touching your personal config:
+built-in `vim.pack`, using the Mocha flavour with brighter line numbers.
+
+The file is compiled into `md.exe`. On startup md writes it to
+`%APPDATA%\md\init.lua` (only when it changed) and starts, in the background,
+
+```
+nvim --embed -u %APPDATA%\md\init.lua [file.md]
+```
+
+`nvim` must be on `PATH`. To try the config on its own:
 
 ```bat
-set NVIM_APPNAME=md-nvim
 nvim -u nvim\init.lua README.md
 ```
 

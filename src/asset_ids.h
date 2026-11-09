@@ -12,5 +12,6 @@
 #define ASSET_ROBOTO_MONO        107
 #define ASSET_ROBOTO_MONO_ITALIC 108
 #define ASSET_NOTO_EMOJI         109
+#define ASSET_NVIM_INIT          110
 
 #endif
