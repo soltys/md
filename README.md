@@ -122,46 +122,38 @@ nvim --embed -u %APPDATA%\md\init.lua [file.md]
 nvim -u nvim\init.lua README.md
 ```
 
-## pixel: PICO-8 pixel art tool
+## Pixel art assets (PICO-8 palette)
 
-`tools/pixel` builds `pixel.exe`, a small pixel art editor for md's icons and
-artwork. It only knows the 16 colours of the
-[PICO-8 palette](https://pico-8.fandom.com/wiki/Palette) plus transparent, and
-like md it is one self-contained executable (SDL3 + SDL3_image, static CRT).
-It is built with the rest of the project (`-DMD_BUILD_TOOLS=OFF` skips it):
+md's pixel art is drawn as text in `art/*.txt` and turned into PNGs by
+`pixelart.exe` (`tools/pixelart`), a small console tool. Every pixel is one
+character: `0`-`9`, `a`-`f` pick one of the 16
+[PICO-8 colours](https://pico-8.fandom.com/wiki/Palette), `.` is transparent.
 
-```bat
-cmake --build --preset release --target pixel
-build\vs2026\Release\pixel.exe art\icon.png 32x32
+```
+sprite ok x1 x2 x4
+........
+.......b
+......bb
+b....bb.
+bb..bb..
+.bbbb...
+..bb....
+........
 ```
 
-`pixel.exe [file.png] [WxH]` opens the PNG, or starts a new canvas (16x16 by
-default, up to 256x256) that is saved to that name. Opened images are mapped
-to the nearest PICO-8 colour. Ctrl+S saves a 1:1 PNG with a transparent
-background; Ctrl+E also writes `<name>@8x.png` and, for square canvases,
-`<name>.ico` with every Windows icon size that is a whole multiple of the
-canvas (a 16x16 or 32x32 drawing gives crisp 16 to 256 px icons).
+`x1 x2 x4` are the sizes to write: `ok.png`, `ok@2x.png`, `ok@4x.png`, scaled
+by repeating pixels so edges stay sharp. A blank line ends a sprite. The
+generated PNGs are committed in `art/png`; after editing a sheet, regenerate
+them with
 
-| Key / mouse | Action |
-| --- | --- |
-| Left / right button | Draw with colour 1 / colour 2 (transparent by default) |
-| Click / right-click palette | Choose colour 1 / colour 2 |
-| B, L, R, F, I | Pencil, line, rectangle (hold Shift: filled), fill, picker |
-| Alt+click | Pick a colour from the canvas |
-| X, [ ] | Swap colours, previous / next colour |
-| M | Mirror drawing: off, left/right, top/bottom, both |
-| G | Grid on/off |
-| N / Shift+N | Canvas size up / down (8, 16, 32, 64, 128, 256) |
-| Shift+arrows | Shift the image by one pixel (wraps around) |
-| H / V | Flip horizontally / vertically |
-| Wheel, Ctrl+= / Ctrl+-, Home | Zoom, fit to window |
-| Middle drag or Space+drag | Pan |
-| Ctrl+Z / Ctrl+Y | Undo / redo |
-| Ctrl+N | Clear the canvas |
-| Ctrl+O or drop a file | Open a PNG |
-| Ctrl+S / Ctrl+Shift+S | Save / save as |
-| Ctrl+E | Export `@8x.png` and `.ico` next to the saved PNG |
-| F1 | Help |
+```bat
+cmake --build --preset release --target art
+```
+
+or run the tool directly: `pixelart.exe -o art\png art\sprites.txt`.
+Mistakes (unknown colour characters, ragged rows, bad scales) are reported as
+`file:line: error: ...` and the tool exits with status 1.
+`-DMD_BUILD_TOOLS=OFF` leaves the tool out of the build.
 
 ## How startup is kept fast
 
@@ -191,7 +183,7 @@ canvas (a 16x16 or 32x32 drawing gives crisp 16 to 256 px icons).
 | `src/editor.c` | Draws Neovim's grid |
 | `src/fonts.c`, `src/assets.c` | Embedded fonts (RCDATA) and font cache |
 | `src/emoji.c`, `src/images.c` | Emoji clustering, async image loading |
-| `tools/pixel/pixel.c` | `pixel.exe`, the PICO-8 pixel art tool |
+| `tools/pixelart/pixelart.c`, `art/` | PICO-8 sprite sheets to PNG assets |
 
 ## Status
 
