@@ -16,4 +16,9 @@
 #define ASSET_ROBOTO_MONO_BOLD   111
 #define ASSET_ROBOTO_MONO_BOLD_ITALIC 112
 
+/* Application icon (art/png/md-icon.ico, drawn in art/sprites.txt). It is the
+ * first icon in the exe, so Explorer shows it and SDL uses it for the window
+ * class (taskbar, title bar) without any code. */
+#define MD_APP_ICON              1
+
 #endif

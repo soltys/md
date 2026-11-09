@@ -1,6 +1,10 @@
+![md](art/png/md-icon@8x.png)
+
 # md
 
-A Markdown viewer/editor for Windows built for the fastest possible cold start.
+![PICO-8 palette](art/png/palette-strip@16x.png)
+
+**A Markdown viewer/editor for Windows built for the fastest possible cold start.**
 
 * C11, compiled with MSVC only, built with CMake
 * SDL3 + SDL3_ttf (FreeType, HarfBuzz, plutosvg) + SDL3_image for rendering
@@ -10,7 +14,7 @@ A Markdown viewer/editor for Windows built for the fastest possible cold start.
 * Ships as a single `md.exe`: every dependency and the C runtime are linked
   statically, fonts are Win32 resources read in place from the mapped image
 
-## Building
+## ![](art/png/hammer@3x.png) Building
 
 Requires **CMake 4.0 or newer** and **Visual Studio 2026** (workload
 "Desktop development with C++"). All dependencies are downloaded by CMake
@@ -49,7 +53,7 @@ build\ninja-release\md.exe README.md
 | `ninja-release` | Ninja, MSVC `cl` | `build/ninja-release/md.exe` |
 | `ninja-debug` | Ninja, MSVC `cl` | `build/ninja-debug/md.exe` |
 
-## Usage
+## ![](art/png/keyboard@3x.png) Usage
 
 ```
 md.exe file.md          # viewer only
@@ -87,7 +91,7 @@ and other keyboards (AltGr is Ctrl+Alt on Windows) or with Neovim's own keys.
 Everything else goes to Neovim. Closing the window sends `:qa` to Neovim, so
 unsaved changes are never dropped silently.
 
-### Rendering
+### ![](art/png/page@3x.png) Rendering
 
 * Headings, paragraphs, hard/soft line breaks, block quotes (nested), lists
   (nested, ordered, task lists), horizontal rules
@@ -103,7 +107,7 @@ unsaved changes are never dropped silently.
   JavaScript, JSON, Bash, Rust and Lua
 * Light/dark theme following Windows
 
-## Neovim config
+## ![](art/png/pencil@3x.png) Neovim config
 
 `nvim/init.lua` is the editor config for the embedded Neovim pane (Neovim
 0.12+). It sets a few prose-friendly options and installs the
@@ -123,7 +127,7 @@ nvim --embed -u %APPDATA%\md\init.lua [file.md]
 nvim -u nvim\init.lua README.md
 ```
 
-## Pixel art assets (PICO-8 palette)
+## ![](art/png/palette@3x.png) Pixel art assets (PICO-8 palette)
 
 md's pixel art is drawn as text in `art/*.txt` and turned into PNGs by
 `pixelart.exe` (`tools/pixelart`), a small console tool. Every pixel is one
@@ -143,9 +147,19 @@ bb..bb..
 ```
 
 `x1 x2 x4` are the sizes to write: `ok.png`, `ok@2x.png`, `ok@4x.png`, scaled
-by repeating pixels so edges stay sharp. A blank line ends a sprite. The
-generated PNGs are committed in `art/png`; after editing a sheet, regenerate
-them with
+by repeating pixels so edges stay sharp. Adding `ico` to the header also
+writes `<name>.ico` with every size up to 256x256. A blank line ends a sprite.
+
+| Sheet | Sprites |
+| --- | --- |
+| `art/sprites.txt` | ![](art/png/md-icon@2x.png) app icon, ![](art/png/ok@2x.png) ![](art/png/warning@2x.png) ![](art/png/error@2x.png) status icons |
+| `art/readme.txt` | ![](art/png/hammer@2x.png) ![](art/png/keyboard@2x.png) ![](art/png/page@2x.png) ![](art/png/pencil@2x.png) ![](art/png/palette@2x.png) ![](art/png/bolt@2x.png) ![](art/png/folder@2x.png) this README's section icons and the palette strip |
+
+`md.exe`'s own icon (Explorer, taskbar, title bar) is `art/png/md-icon.ico`,
+compiled into the executable as an `ICON` resource.
+
+The generated files are committed in `art/png`; after editing a sheet,
+regenerate them with
 
 ```bat
 cmake --build --preset release --target art
@@ -156,7 +170,7 @@ Mistakes (unknown colour characters, ragged rows, bad scales) are reported as
 `file:line: error: ...` and the tool exits with status 1.
 `-DMD_BUILD_TOOLS=OFF` leaves the tool out of the build.
 
-## How startup is kept fast
+## ![](art/png/bolt@3x.png) How startup is kept fast
 
 1. Before `SDL_Init`, three threads start: one initialises FreeType/HarfBuzz
    and opens the embedded fonts, one reads and parses the file, one writes the
@@ -172,7 +186,7 @@ Mistakes (unknown colour characters, ragged rows, bad scales) are reported as
 6. Images and syntax highlighting queries load lazily on worker threads.
 7. The window is DPI-aware through the manifest, so it opens at the right size.
 
-## Source layout
+## ![](art/png/folder@3x.png) Source layout
 
 | File | Purpose |
 | --- | --- |
@@ -186,7 +200,9 @@ Mistakes (unknown colour characters, ragged rows, bad scales) are reported as
 | `src/emoji.c`, `src/images.c` | Emoji clustering, async image loading |
 | `tools/pixelart/pixelart.c`, `art/` | PICO-8 sprite sheets to PNG assets |
 
-## Status
+## ![](art/png/ok@3x.png) Status
 
 All four planned steps are in: skeleton and fast start, full viewer, embedded
 Neovim with split view, and code highlighting / scroll sync / startup polish.
+
+![](art/png/palette-strip@16x.png)

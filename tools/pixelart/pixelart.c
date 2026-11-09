@@ -15,7 +15,8 @@
  *                                 <- a blank line (or the next sprite) ends it
  *
  * Each scale writes one PNG: x1 -> name.png, x4 -> name@4x.png. Pixels are
- * scaled by plain repetition, so they stay hard-edged.
+ * scaled by plain repetition, so they stay hard-edged. The extra word `ico`
+ * also writes name.ico (Windows icon) holding every scale up to 256x256.
  */
 #include <SDL3/SDL.h>
 #include <SDL3_image/SDL_image.h>
@@ -37,6 +38,7 @@ static const uint32_t PAL[16] = {
 typedef struct {
     char name[128];
     int scales[MAX_SCALES], nscales;
+    bool ico;
     int w, h;
     int8_t px[MAX_DIM * MAX_DIM]; /* -1 = transparent */
     const char *file;
@@ -66,16 +68,12 @@ static int color_of(char c)
     return -2;
 }
 
-static bool write_png(const Sprite *s, int scale)
+static SDL_Surface *render(const Sprite *s, int scale)
 {
-    char path[1024];
-    if (scale == 1) snprintf(path, sizeof path, "%s/%s.png", outdir, s->name);
-    else snprintf(path, sizeof path, "%s/%s@%dx.png", outdir, s->name, scale);
-
     SDL_Surface *surf = SDL_CreateSurface(s->w * scale, s->h * scale, SDL_PIXELFORMAT_RGBA32);
     if (!surf) {
         fail(s->file, s->line, "%s: %s", s->name, SDL_GetError());
-        return false;
+        return NULL;
     }
     for (int y = 0; y < surf->h; y++) {
         Uint8 *row = (Uint8 *)surf->pixels + (size_t)y * (size_t)surf->pitch;
@@ -92,6 +90,17 @@ static bool write_png(const Sprite *s, int scale)
             }
         }
     }
+    return surf;
+}
+
+static bool write_png(const Sprite *s, int scale)
+{
+    char path[1024];
+    if (scale == 1) snprintf(path, sizeof path, "%s/%s.png", outdir, s->name);
+    else snprintf(path, sizeof path, "%s/%s@%dx.png", outdir, s->name, scale);
+
+    SDL_Surface *surf = render(s, scale);
+    if (!surf) return false;
     bool ok = IMG_SavePNG(surf, path);
     SDL_DestroySurface(surf);
     if (!ok) {
@@ -103,12 +112,97 @@ static bool write_png(const Sprite *s, int scale)
     return true;
 }
 
+static void put_le16(Uint8 *p, unsigned v)
+{
+    p[0] = (Uint8)v;
+    p[1] = (Uint8)(v >> 8);
+}
+
+static void put_le32(Uint8 *p, Uint32 v)
+{
+    put_le16(p, v & 0xffff);
+    put_le16(p + 2, v >> 16);
+}
+
+/* A .ico whose entries are PNG-compressed images (Windows Vista and later),
+   one per scale that fits the 256x256 icon limit. */
+static bool write_ico(const Sprite *s)
+{
+    char path[1024];
+    snprintf(path, sizeof path, "%s/%s.ico", outdir, s->name);
+    if (s->w != s->h) {
+        fail(s->file, s->line, "'%s': icons must be square, this is %dx%d", s->name, s->w, s->h);
+        return false;
+    }
+    SDL_IOStream *png[MAX_SCALES];
+    int dim[MAX_SCALES], n = 0;
+    bool ok = true;
+    for (int i = 0; i < s->nscales && ok; i++) {
+        int d = s->w * s->scales[i];
+        if (d > 256) continue;
+        SDL_Surface *surf = render(s, s->scales[i]);
+        SDL_IOStream *io = SDL_IOFromDynamicMem();
+        ok = surf && io && IMG_SavePNG_IO(surf, io, false);
+        SDL_DestroySurface(surf);
+        if (!ok) {
+            if (io) SDL_CloseIO(io);
+            break;
+        }
+        png[n] = io;
+        dim[n++] = d;
+    }
+    if (ok && n == 0) {
+        fail(s->file, s->line, "'%s': no scale fits in a 256x256 icon", s->name);
+        return false;
+    }
+    SDL_IOStream *f = ok ? SDL_IOFromFile(path, "wb") : NULL;
+    if (f) {
+        Uint8 hdr[6], ent[16];
+        put_le16(hdr, 0);
+        put_le16(hdr + 2, 1); /* type: icon */
+        put_le16(hdr + 4, (unsigned)n);
+        ok = SDL_WriteIO(f, hdr, 6) == 6;
+        Uint32 offset = 6 + 16 * (Uint32)n;
+        for (int i = 0; i < n && ok; i++) {
+            Uint32 len = (Uint32)SDL_GetIOSize(png[i]);
+            memset(ent, 0, sizeof ent);
+            ent[0] = ent[1] = (Uint8)(dim[i] == 256 ? 0 : dim[i]); /* 0 means 256 */
+            put_le16(ent + 4, 1);  /* colour planes */
+            put_le16(ent + 6, 32); /* bits per pixel */
+            put_le32(ent + 8, len);
+            put_le32(ent + 12, offset);
+            offset += len;
+            ok = SDL_WriteIO(f, ent, 16) == 16;
+        }
+        for (int i = 0; i < n && ok; i++) {
+            void *mem = SDL_GetPointerProperty(SDL_GetIOProperties(png[i]),
+                                               SDL_PROP_IOSTREAM_DYNAMIC_MEMORY_POINTER, NULL);
+            size_t len = (size_t)SDL_GetIOSize(png[i]);
+            ok = mem && SDL_WriteIO(f, mem, len) == len;
+        }
+        ok = SDL_CloseIO(f) && ok;
+    } else {
+        ok = false;
+    }
+    for (int i = 0; i < n; i++) SDL_CloseIO(png[i]);
+    if (!ok) {
+        fail(s->file, s->line, "can't write %s: %s", path, SDL_GetError());
+        return false;
+    }
+    printf("%s (%d sizes)\n", path, n);
+    written++;
+    return true;
+}
+
 static void finish(Sprite *s)
 {
     if (!s->name[0]) return;
     if (s->h == 0) fail(s->file, s->line, "sprite '%s' has no rows", s->name);
     else
+    {
         for (int i = 0; i < s->nscales; i++) write_png(s, s->scales[i]);
+        if (s->ico) write_ico(s);
+    }
     s->name[0] = 0;
 }
 
@@ -129,15 +223,19 @@ static void start(Sprite *s, char *args, const char *file, int line)
     s->file = file;
     s->line = line;
     if (!tok || !valid_name(tok)) {
-        fail(file, line, "expected 'sprite <name> [x1 x2 ...]' (name: letters, digits, - _)");
+        fail(file, line, "expected 'sprite <name> [x1 x2 ...] [ico]' (name: letters, digits, - _)");
         return;
     }
     SDL_strlcpy(s->name, tok, sizeof s->name);
     while ((tok = SDL_strtok_r(NULL, " \t", &save)) != NULL) {
+        if (SDL_strcmp(tok, "ico") == 0) {
+            s->ico = true;
+            continue;
+        }
         char *end = tok;
         long k = (tok[0] == 'x' || tok[0] == 'X') ? SDL_strtol(tok + 1, &end, 10) : 0;
         if (k < 1 || k > 64 || *end) {
-            fail(file, line, "bad scale '%s' (use x1 .. x64)", tok);
+            fail(file, line, "bad option '%s' (use x1 .. x64 or ico)", tok);
             s->name[0] = 0;
             return;
         }
@@ -260,7 +358,7 @@ int main(int argc, char **argv)
         fprintf(stderr, "usage: pixelart [-o outdir] sheet.txt [more.txt ...]\n");
         return 2;
     }
-    printf("%d PNG%s written%s\n", written, written == 1 ? "" : "s",
+    printf("%d file%s written%s\n", written, written == 1 ? "" : "s",
            errors ? ", with errors" : "");
     return errors ? 1 : 0;
 }

@@ -1,6 +1,8 @@
 // Generated from src/assets.rc.in by CMake. Do not edit the generated copy.
 #include "asset_ids.h"
 
+MD_APP_ICON              ICON   "@MD_APP_ICON_FILE@"
+
 ASSET_ROBOTO_REGULAR     RCDATA "@MD_FONT_ROBOTO_REGULAR@"
 ASSET_ROBOTO_ITALIC      RCDATA "@MD_FONT_ROBOTO_ITALIC@"
 ASSET_ROBOTO_MEDIUM      RCDATA "@MD_FONT_ROBOTO_MEDIUM@"

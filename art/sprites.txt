@@ -8,10 +8,11 @@
 #   8 red         9 orange      a yellow       b green
 #   c blue        d lavender    e pink         f light peach
 #
-# 'sprite <name> x1 x4' writes <name>.png and <name>@4x.png.
+# 'sprite <name> x1 x4' writes <name>.png and <name>@4x.png; adding 'ico'
+# also writes <name>.ico with every size up to 256x256.
 
 # App icon: "md." on a rounded dark-blue tile (after docs/md-logo.svg).
-sprite md-icon x1 x2 x3 x4 x8 x16
+sprite md-icon x1 x2 x3 x4 x8 x16 ico
 .11111111111111.
 1111111111111111
 1111111111111111
@@ -30,7 +31,7 @@ sprite md-icon x1 x2 x3 x4 x8 x16
 .11111111111111.
 
 # Toast / status icons.
-sprite ok x1 x2 x4
+sprite ok x1 x2 x3 x4
 ........
 .......b
 ......bb
@@ -40,7 +41,7 @@ bb..bb..
 ..bb....
 ........
 
-sprite warning x1 x2 x4
+sprite warning x1 x2 x3 x4
 ...aa...
 ..aaaa..
 ..a00a..
@@ -50,7 +51,7 @@ aaaaaaaa
 aaa00aaa
 aaaaaaaa
 
-sprite error x1 x2 x4
+sprite error x1 x2 x3 x4
 .888888.
 88888888
 88788788
