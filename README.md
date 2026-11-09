@@ -63,6 +63,19 @@ You can also drop a file on the window or press **Ctrl+O**.
 | Ctrl+Q / Ctrl+W | Quit |
 | Up / Down, PgUp / PgDn, Space, Home / End, mouse wheel | Scroll |
 
+## Neovim config
+
+`nvim/init.lua` is the editor config for the embedded Neovim pane (Neovim
+0.12+). It sets a few prose-friendly options and installs the
+[catppuccin](https://github.com/catppuccin/nvim) colorscheme through the
+built-in `vim.pack` (Latte for light backgrounds, Mocha for dark). To try it on
+its own without touching your personal config:
+
+```bat
+set NVIM_APPNAME=md-nvim
+nvim -u nvim\init.lua README.md
+```
+
 ## How startup is kept fast
 
 1. Before `SDL_Init`, a font thread starts initialising FreeType/HarfBuzz and
