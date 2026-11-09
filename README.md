@@ -12,21 +12,42 @@ A Markdown viewer/editor for Windows built for the fastest possible cold start.
 
 ## Building
 
-Requires Visual Studio 2022 (Desktop development with C++) and CMake 3.24+.
-All dependencies are downloaded by CMake `FetchContent` during configure.
+Requires **CMake 4.0 or newer** and **Visual Studio 2026** (workload
+"Desktop development with C++"). All dependencies are downloaded by CMake
+`FetchContent` during configure, so the first configure takes a while.
+
+Everything is driven by `CMakePresets.json`. The quickest way is the default
+workflow, which configures with the `Visual Studio 18 2026` generator (x64)
+and builds Release:
 
 ```bat
-cmake -S . -B build -G "Visual Studio 17 2022" -A x64
-cmake --build build --config Release
-build\Release\md.exe README.md
+cmake --workflow --preset default
+build\vs2026\Release\md.exe README.md
 ```
 
-Or with Ninja from a *Developer Command Prompt*:
+Or step by step:
 
 ```bat
-cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
-cmake --build build
+cmake --preset vs2026
+cmake --build --preset release      :: or: --preset debug
 ```
+
+`build\vs2026\md.sln` can also be opened in Visual Studio, or open the folder
+directly and pick a preset there.
+
+For Ninja builds, run from a *Developer Command Prompt for VS 2026*:
+
+```bat
+cmake --preset ninja-release
+cmake --build --preset ninja-release
+build\ninja-release\md.exe README.md
+```
+
+| Configure preset | Generator | Output |
+| --- | --- | --- |
+| `vs2026` (default) | Visual Studio 18 2026, x64 | `build/vs2026/<Config>/md.exe` |
+| `ninja-release` | Ninja, MSVC `cl` | `build/ninja-release/md.exe` |
+| `ninja-debug` | Ninja, MSVC `cl` | `build/ninja-debug/md.exe` |
 
 ## Usage
 

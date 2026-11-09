@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.24)
+cmake_minimum_required(VERSION 4.0)
 
 # Static CRT everywhere (our code and every fetched dependency) so the result
 # is a single self-contained md.exe. Must be set before project().
