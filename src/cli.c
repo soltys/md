@@ -143,7 +143,7 @@ static const char HELP[] =
 "    sequences), and fenced code blocks with syntax highlighting for C, C++,\n"
 "    C#, Python, JavaScript, JSON, Bash, Rust and Lua. HTML blocks are shown as\n"
 "    source. The colours follow the Windows light / dark theme; code blocks\n"
-"    always use the Catppuccin Mocha palette, like the editor.\n"
+"    use Catppuccin colours: Latte when light, Mocha when dark.\n"
 "\n"
 "    Fonts (Roboto, Roboto Mono, Noto Color Emoji) are built into md.exe;\n"
 "    nothing has to be installed besides Neovim for the editor.\n"

@@ -20,34 +20,72 @@ typedef struct Theme {
     SDL_Color syntax[HL_COUNT];
 } Theme;
 
-/* Code blocks use Catppuccin Mocha (https://catppuccin.com/palette/) in
- * both themes, matching the editor pane. Roles follow catppuccin/nvim's
+/* Code blocks use Catppuccin (https://catppuccin.com/palette/): Latte in
+ * the light theme, Mocha in the dark one. Roles follow catppuccin/nvim's
  * lua/catppuccin/groups/treesitter.lua (see class_for in highlight.c). */
-#define MOCHA(hex) {(Uint8)((hex) >> 16), (Uint8)(((hex) >> 8) & 0xFF), (Uint8)((hex) & 0xFF), 0xFF}
-#define MOCHA_CODE \
-    .block_bg    = MOCHA(0x1E1E2E), /* base */ \
-    .block_text  = MOCHA(0xCDD6F4), /* text */ \
-    .block_label = MOCHA(0x7F849C), /* overlay1 */ \
+#define CTP(hex) {(Uint8)((hex) >> 16), (Uint8)(((hex) >> 8) & 0xFF), (Uint8)((hex) & 0xFF), 0xFF}
+#define LATTE_FLAMINGO 0xDD7878
+#define LATTE_PINK 0xEA76CB
+#define LATTE_MAUVE 0x8839EF
+#define LATTE_RED 0xD20F39
+#define LATTE_MAROON 0xE64553
+#define LATTE_PEACH 0xFE640B
+#define LATTE_YELLOW 0xDF8E1D
+#define LATTE_GREEN 0x40A02B
+#define LATTE_TEAL 0x179299
+#define LATTE_SKY 0x04A5E5
+#define LATTE_SAPPHIRE 0x209FB5
+#define LATTE_BLUE 0x1E66F5
+#define LATTE_LAVENDER 0x7287FD
+#define LATTE_TEXT 0x4C4F69
+#define LATTE_OVERLAY2 0x7C7F93
+#define LATTE_OVERLAY1 0x8C8FA1
+#define LATTE_BASE 0xEFF1F5
+#define LATTE_MANTLE 0xE6E9EF
+
+#define MOCHA_FLAMINGO 0xF2CDCD
+#define MOCHA_PINK 0xF5C2E7
+#define MOCHA_MAUVE 0xCBA6F7
+#define MOCHA_RED 0xF38BA8
+#define MOCHA_MAROON 0xEBA0AC
+#define MOCHA_PEACH 0xFAB387
+#define MOCHA_YELLOW 0xF9E2AF
+#define MOCHA_GREEN 0xA6E3A1
+#define MOCHA_TEAL 0x94E2D5
+#define MOCHA_SKY 0x89DCEB
+#define MOCHA_SAPPHIRE 0x74C7EC
+#define MOCHA_BLUE 0x89B4FA
+#define MOCHA_LAVENDER 0xB4BEFE
+#define MOCHA_TEXT 0xCDD6F4
+#define MOCHA_OVERLAY2 0x9399B2
+#define MOCHA_OVERLAY1 0x7F849C
+#define MOCHA_BASE 0x1E1E2E
+#define MOCHA_MANTLE 0x181825
+
+#define CATPPUCCIN_CODE(F) \
+    .block_bg    = CTP(F##_BASE), \
+    .block_text  = CTP(F##_TEXT), \
+    .block_label = CTP(F##_OVERLAY1), \
     .syntax = { \
-        [HL_KEYWORD]          = MOCHA(0xCBA6F7), /* mauve */ \
-        [HL_STRING]           = MOCHA(0xA6E3A1), /* green */ \
-        [HL_COMMENT]          = MOCHA(0x9399B2), /* overlay2 */ \
-        [HL_NUMBER]           = MOCHA(0xFAB387), /* peach */ \
-        [HL_CONSTANT]         = MOCHA(0xFAB387), /* peach */ \
-        [HL_FUNCTION]         = MOCHA(0x89B4FA), /* blue */ \
-        [HL_TYPE]             = MOCHA(0xF9E2AF), /* yellow */ \
-        [HL_VARIABLE_BUILTIN] = MOCHA(0xF38BA8), /* red */ \
-        [HL_OPERATOR]         = MOCHA(0x89DCEB), /* sky */ \
-        [HL_PUNCTUATION]      = MOCHA(0x9399B2), /* overlay2 */ \
-        [HL_PROPERTY]         = MOCHA(0xB4BEFE), /* lavender */ \
-        [HL_TAG]              = MOCHA(0x89B4FA), /* blue */ \
-        [HL_ATTRIBUTE]        = MOCHA(0xF9E2AF), /* yellow */ \
-        [HL_PARAMETER]        = MOCHA(0xEBA0AC), /* maroon */ \
-        [HL_FUNCTION_BUILTIN] = MOCHA(0xFAB387), /* peach */ \
-        [HL_SPECIAL]          = MOCHA(0xF5C2E7), /* pink */ \
-        [HL_CHARACTER]        = MOCHA(0x94E2D5), /* teal */ \
-        [HL_LABEL]            = MOCHA(0x74C7EC), /* sapphire */ \
-        [HL_SYMBOL]           = MOCHA(0xF2CDCD), /* flamingo */ \
+        [HL_KEYWORD]          = CTP(F##_MAUVE), \
+        [HL_STRING]           = CTP(F##_GREEN), \
+        [HL_COMMENT]          = CTP(F##_OVERLAY2), \
+        [HL_NUMBER]           = CTP(F##_PEACH), \
+        [HL_CONSTANT]         = CTP(F##_PEACH), \
+        [HL_FUNCTION]         = CTP(F##_BLUE), \
+        [HL_TYPE]             = CTP(F##_YELLOW), \
+        [HL_VARIABLE_BUILTIN] = CTP(F##_RED), \
+        [HL_OPERATOR]         = CTP(F##_SKY), \
+        [HL_PUNCTUATION]      = CTP(F##_OVERLAY2), \
+        [HL_PROPERTY]         = CTP(F##_LAVENDER), \
+        [HL_TAG]              = CTP(F##_BLUE), \
+        [HL_ATTRIBUTE]        = CTP(F##_YELLOW), \
+        [HL_PARAMETER]        = CTP(F##_MAROON), \
+        [HL_FUNCTION_BUILTIN] = CTP(F##_PEACH), \
+        [HL_SPECIAL]          = CTP(F##_PINK), \
+        [HL_CHARACTER]        = CTP(F##_TEAL), \
+        [HL_LABEL]            = CTP(F##_SAPPHIRE), \
+        [HL_SYMBOL]           = CTP(F##_FLAMINGO), \
     }
 
 static const Theme THEME_LIGHT = {
@@ -60,7 +98,7 @@ static const Theme THEME_LIGHT = {
     .code_text = {0x1F, 0x23, 0x28, 0xFF},
     .quote_bar = {0xD0, 0xD7, 0xDE, 0xFF},
     .accent    = {0x09, 0x69, 0xDA, 0xFF},
-    MOCHA_CODE,
+    CATPPUCCIN_CODE(LATTE),
 };
 
 static const Theme THEME_DARK = {
@@ -73,7 +111,7 @@ static const Theme THEME_DARK = {
     .code_text = {0xE6, 0xED, 0xF3, 0xFF},
     .quote_bar = {0x3D, 0x44, 0x4D, 0xFF},
     .accent    = {0x47, 0x8B, 0xE6, 0xFF},
-    MOCHA_CODE,
+    CATPPUCCIN_CODE(MOCHA),
 };
 
 #endif
