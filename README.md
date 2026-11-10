@@ -9,8 +9,10 @@
 * C11, compiled with MSVC only, built with CMake
 * SDL3 + SDL3_ttf (FreeType, HarfBuzz, plutosvg) + SDL3_image for rendering
 * tree-sitter + tree-sitter-markdown for parsing
-* Roboto (Regular, Italic, Medium, Bold, Bold Italic, Light, Mono, Mono Italic)
-  and Noto Color Emoji embedded in the executable
+* Roboto (Regular, Italic, Medium, Bold, Bold Italic, Light), Roboto Mono
+  Nerd Font (Regular, Italic, Bold, Bold Italic; editor and code), Noto Color
+  Emoji and Noto Sans Math / Symbols 2 (arrows, math, check marks) embedded in
+  the executable
 * Ships as a single `md.exe`: every dependency and the C runtime are linked
   statically, fonts are Win32 resources read in place from the mapped image
 

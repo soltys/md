@@ -10,7 +10,10 @@ typedef struct FontEntry {
     float px;
     TTF_Font *font;
     TTF_Font *emoji; /* fallback, same size, shared between faces */
-    bool owns_emoji;
+    TTF_Font *math;  /* symbol fallbacks, shared the same way */
+    TTF_Font *symbols;
+    TTF_Font *nerd;  /* Nerd Font icons for the proportional faces */
+    bool owns_fallbacks;
 } FontEntry;
 
 static const int face_asset[FONT_FACE_COUNT] = {
@@ -53,16 +56,31 @@ static TTF_Font *create_entry(FontFace face, float px)
     TTF_Font *font = open_asset(face_asset[face], px);
     if (!font) return NULL;
 
-    /* One emoji face per size, shared by all text faces of that size. */
-    TTF_Font *emoji = NULL;
+    /* One set of fallback faces per size, shared by all text faces of that
+     * size. Symbols come before emoji so arrows and check marks stay plain
+     * text glyphs (emoji_cluster() routes real emoji to the emoji face). */
+    TTF_Font *emoji = NULL, *math = NULL, *symbols = NULL, *nerd = NULL;
     bool owns = false;
     for (int i = 0; i < cache_count && !emoji; ++i) {
-        if (cache[i].px == px && cache[i].emoji) emoji = cache[i].emoji;
+        if (cache[i].px == px && cache[i].emoji) {
+            emoji = cache[i].emoji;
+            math = cache[i].math;
+            symbols = cache[i].symbols;
+            nerd = cache[i].nerd;
+        }
     }
     if (!emoji) {
+        math = open_asset(ASSET_NOTO_MATH, px);
+        symbols = open_asset(ASSET_NOTO_SYMBOLS2, px);
+        nerd = open_asset(ASSET_ROBOTO_MONO, px);
         emoji = open_asset(ASSET_NOTO_EMOJI, px);
-        owns = emoji != NULL;
+        owns = true;
     }
+    if (math) TTF_AddFallbackFont(font, math);
+    if (symbols) TTF_AddFallbackFont(font, symbols);
+    bool mono = face == FONT_MONO || face == FONT_MONO_ITALIC || face == FONT_MONO_BOLD ||
+                face == FONT_MONO_BOLD_ITALIC;
+    if (nerd && !mono) TTF_AddFallbackFont(font, nerd);
     if (emoji) TTF_AddFallbackFont(font, emoji);
 
     FontEntry *e = &cache[cache_count++];
@@ -70,7 +88,10 @@ static TTF_Font *create_entry(FontFace face, float px)
     e->px = px;
     e->font = font;
     e->emoji = emoji;
-    e->owns_emoji = owns;
+    e->math = math;
+    e->symbols = symbols;
+    e->nerd = nerd;
+    e->owns_fallbacks = owns;
     return font;
 }
 
@@ -109,7 +130,11 @@ void fonts_shutdown(void)
         TTF_CloseFont(cache[i].font);
     }
     for (int i = 0; i < cache_count; ++i) {
-        if (cache[i].owns_emoji) TTF_CloseFont(cache[i].emoji);
+        if (!cache[i].owns_fallbacks) continue;
+        if (cache[i].emoji) TTF_CloseFont(cache[i].emoji);
+        if (cache[i].math) TTF_CloseFont(cache[i].math);
+        if (cache[i].symbols) TTF_CloseFont(cache[i].symbols);
+        if (cache[i].nerd) TTF_CloseFont(cache[i].nerd);
     }
     cache_count = 0;
     TTF_Quit();

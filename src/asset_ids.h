@@ -15,6 +15,8 @@
 #define ASSET_NVIM_INIT          110
 #define ASSET_ROBOTO_MONO_BOLD   111
 #define ASSET_ROBOTO_MONO_BOLD_ITALIC 112
+#define ASSET_NOTO_MATH          113
+#define ASSET_NOTO_SYMBOLS2      114
 
 /* Application icon (art/png/md-icon.ico, drawn in art/sprites.txt). It is the
  * first icon in the exe, so Explorer shows it and SDL uses it for the window
