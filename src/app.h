@@ -63,7 +63,7 @@ typedef struct App {
     float press_x, press_y;
 
     /* Short status message ("Copied ...") drawn over the viewer. */
-    char toast[96];
+    char toast[160];
     Uint64 toast_until;  /* SDL_GetTicks() deadline */
 
     bool show_help;      /* F1 overlay */

@@ -133,6 +133,15 @@ bool images_pump(SDL_Renderer *r)
     return changed;
 }
 
+bool images_loading(void)
+{
+    bool loading = false;
+    SDL_LockMutex(lock);
+    for (int i = 0; i < cache_count && !loading; ++i) loading = cache[i]->state == IMAGE_LOADING;
+    SDL_UnlockMutex(lock);
+    return loading;
+}
+
 void images_shutdown(void)
 {
     /* Worker threads may still run; leave entries they reference alone. */

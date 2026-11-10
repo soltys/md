@@ -110,6 +110,11 @@ float view_line_height(const View *v);
 bool view_link_at(View *v, float x, float y, const char **url, size_t *len);
 
 void view_draw(View *v, SDL_Renderer *r);
+/* Lays out the whole document now (which also requests every image). */
+void view_layout_all(View *v);
+/* Draws the whole document into a new surface (F12, save as PNG). On
+ * failure returns NULL and sets *error. */
+SDL_Surface *view_render_surface(View *v, SDL_Renderer *r, const char **error);
 
 /* Text selection; x/y are viewport pixels. */
 void view_select_start(View *v, float x, float y);

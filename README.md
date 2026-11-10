@@ -100,6 +100,9 @@ open it in md to try it out.
 | Key | Action |
 | --- | --- |
 | F1 | Show / hide a list of all shortcuts |
+| F2 | Copy the full path of the open file |
+| F5 | Reload the file from disk (through Neovim when it runs; unsaved edits are kept) |
+| F12 | Save the whole rendered document as a PNG image |
 | Ctrl+Shift+O | Switch split orientation (side by side / stacked) |
 | Ctrl+Shift+S | Split on/off (off = preview only, the default) |
 | Ctrl+Shift+X | Swap sides: editor left/right (top/bottom when stacked) |

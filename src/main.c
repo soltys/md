@@ -12,6 +12,7 @@
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_main.h>
 #include <SDL3_ttf/SDL_ttf.h>
+#include <SDL3_image/SDL_image.h>
 
 #include "app.h"
 #include "cli.h"
@@ -265,6 +266,8 @@ static void take_loaded_document(void)
     }
 }
 
+static void show_toast_ms(const char *msg, Uint32 ms);
+
 static void pump_nvim(void)
 {
     Nvim *nv = &app.nvim;
@@ -279,6 +282,10 @@ static void pump_nvim(void)
             nv->buf_ready = false;
             start_preview_parse(nv->buf_name, nv->buf_text, nv->buf_text_len);
             nv->buf_name = nv->buf_text = NULL;
+        }
+        if (nv->notice[0]) {
+            show_toast_ms(nv->notice, 2000);
+            nv->notice[0] = 0;
         }
         if (nv->scrolled) {
             nv->scrolled = false;
@@ -383,35 +390,56 @@ static void draw_toast(SDL_Renderer *r)
     TTF_DestroyText(text);
 }
 
-/* F1: every shortcut, in a panel over the whole window. */
+/* F1: every shortcut, in a panel over the whole window. {NULL, title}
+ * starts a section, {NULL, NULL} the second column. */
 static const char *const HELP[][2] = {
+    {NULL, "General"},
     {"F1", "Show / hide this help"},
+    {"F2", "Copy the full path of the file"},
+    {"F5", "Reload the file from disk"},
+    {"F12", "Save the preview as a PNG image"},
     {NULL, "Layout"},
     {"Ctrl+Shift+S", "Editor beside the preview on / off"},
     {"Ctrl+Shift+E", "Editor only on / off"},
     {"Ctrl+Shift+O", "Side by side / stacked"},
     {"Ctrl+Shift+X", "Swap which side the editor is on"},
-    {"Ctrl+Shift+Tab", "Move focus between editor and preview"},
+    {"Ctrl+Shift+Tab", "Move focus: editor / preview"},
     {NULL, "Files"},
     {"Ctrl+Shift+N", "Open a file (or drop one on the window)"},
     {"Ctrl+O", "Open a file (preview focused)"},
     {"Ctrl+Q", "Quit (preview focused)"},
     {"md.exe -e file.md", "Start with the editor open"},
+    {NULL, NULL},
     {NULL, "Preview"},
     {"Wheel, PgUp / PgDn", "Scroll (the editor follows)"},
-    {"Space, Home / End", "Scroll a page, to the start / end"},
-    {"j / k", "Scroll a line down / up (5j: five lines)"},
+    {"Space, Home / End", "A page down, to the start / end"},
+    {"j / k", "A line down / up (5j: five lines)"},
     {"Ctrl+d / Ctrl+u", "Half a page down / up"},
     {"Ctrl+f / Ctrl+b", "A page down / up"},
     {"gg / G", "Start / end (42G: source line 42)"},
-    {"/ or ?", "Search forward / backward (Enter, Esc)"},
+    {"/ or ?", "Search forward / backward"},
     {"n / N", "Next / previous match"},
     {"Drag, Shift+click", "Select text"},
     {"Ctrl+A", "Select all"},
-    {"Ctrl+C", "Copy as rich text (formatting, links, code)"},
+    {"Ctrl+C", "Copy as rich text"},
     {"Ctrl+Shift+C", "Copy as plain text"},
     {"Click a link", "Open it (.md files open in md)"},
 };
+
+typedef struct HelpCol {
+    int first, end;   /* HELP rows [first, end) */
+    float key_w;      /* key column, including the gap after it */
+    float w, h;
+} HelpCol;
+
+static void help_draw_text(TTF_Font *font, const char *s, SDL_Color c, float x, float y)
+{
+    TTF_Text *t = TTF_CreateText(app.engine, font, s, 0);
+    if (!t) return;
+    TTF_SetTextColor(t, c.r, c.g, c.b, 0xFF);
+    TTF_DrawRendererText(t, x, y);
+    TTF_DestroyText(t);
+}
 
 static void draw_help(SDL_Renderer *r)
 {
@@ -432,12 +460,49 @@ static void draw_help(SDL_Renderer *r)
     SDL_RenderFillRect(r, &all);
 
     const int n = (int)SDL_arraysize(HELP);
-    const float row = 26.0f * s, head = 34.0f * s, pad = 28.0f * s;
-    const float key_w = 190.0f * s;
-    float body_h = 0;
-    for (int i = 0; i < n; ++i) body_h += HELP[i][0] ? row : head;
-    const float pw = SDL_min(620.0f * s, (float)w - 32.0f * s);
-    const float ph = SDL_min(pad * 2 + 40.0f * s + body_h, (float)h - 32.0f * s);
+    const float row = 26.0f * s, head = 34.0f * s, pad = 28.0f * s, gap = 40.0f * s;
+    const float title_h = 40.0f * s - (head - row); /* the first heading adds it back */
+
+    /* Measure both columns. */
+    HelpCol col[2] = {{0}};
+    int split = n;
+    for (int i = 0; i < n; ++i) if (!HELP[i][0] && !HELP[i][1]) split = i;
+    col[0].first = 0;
+    col[0].end = split;
+    col[1].first = split < n ? split + 1 : n;
+    col[1].end = n;
+    float desc_w[2] = {0, 0};
+    for (int c = 0; c < 2; ++c) {
+        for (int i = col[c].first; i < col[c].end; ++i) {
+            int tw = 0;
+            if (!HELP[i][0]) {
+                col[c].h += head;
+                continue;
+            }
+            col[c].h += row;
+            TTF_GetStringSize(key_font, HELP[i][0], 0, &tw, NULL);
+            col[c].key_w = SDL_max(col[c].key_w, (float)tw);
+            TTF_GetStringSize(text_font, HELP[i][1], 0, &tw, NULL);
+            desc_w[c] = SDL_max(desc_w[c], (float)tw);
+        }
+        col[c].key_w += 20.0f * s;
+        col[c].w = col[c].key_w + desc_w[c];
+    }
+
+    /* Two columns when they fit, otherwise one under the other. */
+    const bool two = col[0].w + gap + col[1].w + 2 * pad <= (float)w - 32.0f * s;
+    float body_w, body_h;
+    if (two) {
+        body_w = col[0].w + gap + col[1].w;
+        body_h = SDL_max(col[0].h, col[1].h);
+    } else {
+        float kw = SDL_max(col[0].key_w, col[1].key_w);
+        col[0].key_w = col[1].key_w = kw;
+        body_w = kw + SDL_max(desc_w[0], desc_w[1]);
+        body_h = col[0].h + col[1].h;
+    }
+    const float pw = SDL_min(body_w + 2 * pad, (float)w - 32.0f * s);
+    const float ph = SDL_min(pad * 2 + title_h + body_h, (float)h - 32.0f * s);
     SDL_FRect panel = {SDL_floorf(((float)w - pw) * 0.5f), SDL_floorf(((float)h - ph) * 0.5f), pw, ph};
     SDL_SetRenderDrawColor(r, th->bg.r, th->bg.g, th->bg.b, 0xFF);
     SDL_RenderFillRect(r, &panel);
@@ -446,38 +511,24 @@ static void draw_help(SDL_Renderer *r)
 
     SDL_Rect clip = {(int)panel.x, (int)panel.y, (int)panel.w, (int)panel.h};
     SDL_SetRenderClipRect(r, &clip);
-    float x = panel.x + pad, y = panel.y + pad;
-    TTF_Text *t = TTF_CreateText(app.engine, title_font, "Keyboard shortcuts", 0);
-    if (t) {
-        TTF_SetTextColor(t, th->heading.r, th->heading.g, th->heading.b, 0xFF);
-        TTF_DrawRendererText(t, x, y);
-        TTF_DestroyText(t);
-    }
-    y += 40.0f * s;
-    for (int i = 0; i < n; ++i) {
-        if (!HELP[i][0]) { /* section heading */
-            t = TTF_CreateText(app.engine, head_font, HELP[i][1], 0);
-            if (t) {
-                TTF_SetTextColor(t, th->muted.r, th->muted.g, th->muted.b, 0xFF);
-                TTF_DrawRendererText(t, x, y + head - row);
-                TTF_DestroyText(t);
+    help_draw_text(title_font, "Keyboard shortcuts", th->heading, panel.x + pad, panel.y + pad);
+    const float top = panel.y + pad + title_h;
+    float x = panel.x + pad, y = top;
+    for (int c = 0; c < 2; ++c) {
+        if (c == 1 && two) {
+            x += col[0].w + gap;
+            y = top;
+        }
+        for (int i = col[c].first; i < col[c].end; ++i) {
+            if (!HELP[i][0]) { /* section heading */
+                help_draw_text(head_font, HELP[i][1], th->muted, x, y + head - row);
+                y += head;
+                continue;
             }
-            y += head;
-            continue;
+            help_draw_text(key_font, HELP[i][0], th->accent, x, y + 2.0f * s);
+            help_draw_text(text_font, HELP[i][1], th->text, x + col[c].key_w, y);
+            y += row;
         }
-        t = TTF_CreateText(app.engine, key_font, HELP[i][0], 0);
-        if (t) {
-            TTF_SetTextColor(t, th->accent.r, th->accent.g, th->accent.b, 0xFF);
-            TTF_DrawRendererText(t, x, y + 2.0f * s);
-            TTF_DestroyText(t);
-        }
-        t = TTF_CreateText(app.engine, text_font, HELP[i][1], 0);
-        if (t) {
-            TTF_SetTextColor(t, th->text.r, th->text.g, th->text.b, 0xFF);
-            TTF_DrawRendererText(t, x + key_w, y);
-            TTF_DestroyText(t);
-        }
-        y += row;
     }
     SDL_SetRenderClipRect(r, NULL);
 }
@@ -1040,6 +1091,142 @@ static void open_link(const char *url, size_t len)
     SDL_free(u);
 }
 
+/* ----------------------------------------------------- file actions -- */
+
+/* The open file's path as md knows it (may be relative), or NULL. */
+static const char *current_path(void)
+{
+    const char *p = app.view.doc ? app.view.doc->path : NULL;
+    if ((!p || !p[0]) && app.start_file) p = app.start_file;
+    return p && p[0] ? p : NULL;
+}
+
+static const char *base_name(const char *path)
+{
+    const char *name = path;
+    for (const char *q = path; *q; ++q) if (*q == '/' || *q == '\\') name = q + 1;
+    return name;
+}
+
+/* An absolute path, with the platform's separators. Free with SDL_free. */
+static char *absolute_path(const char *path)
+{
+    bool absolute = path[0] == '/' || path[0] == '\\' ||
+                    (path[0] && path[1] == ':' && (path[2] == '/' || path[2] == '\\'));
+    char *out = NULL;
+    if (absolute) {
+        out = SDL_strdup(path);
+    } else {
+        char *cwd = SDL_GetCurrentDirectory(); /* ends with a separator */
+        while (path[0] == '.' && (path[1] == '/' || path[1] == '\\')) path += 2;
+        SDL_asprintf(&out, "%s%s", cwd ? cwd : "", path);
+        SDL_free(cwd);
+    }
+#ifdef _WIN32
+    for (char *q = out; q && *q; ++q) if (*q == '/') *q = '\\';
+#endif
+    return out;
+}
+
+/* F2 */
+static void copy_path(void)
+{
+    const char *p = current_path();
+    if (!p) {
+        show_toast("No file is open");
+        return;
+    }
+    char *abs = absolute_path(p);
+    char msg[160];
+    if (abs && SDL_SetClipboardText(abs)) SDL_snprintf(msg, sizeof msg, "Copied the path of %s", base_name(abs));
+    else SDL_snprintf(msg, sizeof msg, "Could not copy: %s", SDL_GetError());
+    show_toast(msg);
+    SDL_free(abs);
+}
+
+/* F5: through Neovim when it has the file (it keeps unsaved edits safe),
+ * otherwise straight from disk; the scroll position is kept. */
+static void reload_file(void)
+{
+    if (app.nvim_ok && app.nvim.attached) {
+        nvim_reload(&app.nvim);
+        return;
+    }
+    const char *p = current_path();
+    if (!p) {
+        show_toast("No file to reload");
+        return;
+    }
+    start_load(p);
+    char msg[160];
+    SDL_snprintf(msg, sizeof msg, "Reloaded %s", base_name(p));
+    show_toast(msg);
+}
+
+static void SDLCALL save_dialog_done(void *userdata, const char *const *files, int filter)
+{
+    (void)userdata;
+    (void)filter;
+    if (!files || !files[0]) return;
+    SDL_Event ev;
+    SDL_zero(ev);
+    char *copy = SDL_strdup(files[0]);
+    ev.user.type = app.wake_event;
+    ev.user.code = 2;
+    ev.user.data1 = copy;
+    if (!SDL_PushEvent(&ev)) SDL_free(copy);
+}
+
+/* F12: asks where to save, then save_png() does the work. */
+static void show_save_png_dialog(void)
+{
+    if (!app.fonts_ok || !app.view.doc || app.view.doc->error || app.view.doc->block_count == 0) {
+        show_toast("Nothing to render");
+        return;
+    }
+    static const SDL_DialogFileFilter filters[] = {{"PNG image", "png"}};
+    char *def = NULL;
+    const char *p = current_path();
+    if (p) {
+        char *abs = absolute_path(p);
+        if (abs) {
+            char *dot = SDL_strrchr(abs, '.');
+            if (dot && dot > base_name(abs)) *dot = 0;
+            SDL_asprintf(&def, "%s.png", abs);
+            SDL_free(abs);
+        }
+    }
+    SDL_ShowSaveFileDialog(save_dialog_done, NULL, app.window, filters, 1, def);
+    SDL_free(def);
+}
+
+static void save_png(const char *chosen)
+{
+    char *path = NULL;
+    const char *dot = SDL_strrchr(base_name(chosen), '.');
+    if (dot && SDL_strcasecmp(dot, ".png") == 0) path = SDL_strdup(chosen);
+    else SDL_asprintf(&path, "%s.png", chosen);
+
+    /* Images below the fold may not be loaded yet: give them a moment. */
+    view_layout_all(&app.view);
+    const Uint64 start = SDL_GetTicks();
+    while (images_loading() && SDL_GetTicks() - start < 3000) SDL_Delay(10);
+    if (images_pump(app.renderer)) view_relayout(&app.view);
+
+    const char *error = NULL;
+    SDL_Surface *img = view_render_surface(&app.view, app.renderer, &error);
+    char msg[160];
+    if (img && IMG_SavePNG(img, path)) {
+        SDL_snprintf(msg, sizeof msg, "Saved %s (%d x %d)", base_name(path), img->w, img->h);
+    } else {
+        SDL_snprintf(msg, sizeof msg, "Could not save the image: %s", error ? error : SDL_GetError());
+    }
+    show_toast_ms(msg, 2500);
+    SDL_DestroySurface(img);
+    SDL_free(path);
+    app.dirty = true;
+}
+
 /* Returns false when the app should quit. */
 static bool handle_event(const SDL_Event *e)
 {
@@ -1067,6 +1254,11 @@ static bool handle_event(const SDL_Event *e)
         if (app.searching) {
             search_key(&e->key);
             break;
+        }
+        if (!(e->key.mod & (SDL_KMOD_CTRL | SDL_KMOD_ALT | SDL_KMOD_SHIFT | SDL_KMOD_GUI))) {
+            if (e->key.key == SDLK_F2) { copy_path(); break; }
+            if (e->key.key == SDLK_F5) { reload_file(); break; }
+            if (e->key.key == SDLK_F12) { show_save_png_dialog(); break; }
         }
         if (app_shortcut(&e->key)) break;
         if ((e->key.mod & SDL_KMOD_CTRL) && !(e->key.mod & SDL_KMOD_RALT) &&
@@ -1224,6 +1416,9 @@ static bool handle_event(const SDL_Event *e)
         if (e->type == app.wake_event) {
             if (e->user.code == 1 && e->user.data1) { /* file dialog result */
                 open_file(e->user.data1);
+                SDL_free(e->user.data1);
+            } else if (e->user.code == 2 && e->user.data1) { /* save dialog: F12 */
+                save_png(e->user.data1);
                 SDL_free(e->user.data1);
             }
             if (app.toast[0] && SDL_GetTicks() >= app.toast_until) app.dirty = true;

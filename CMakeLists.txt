@@ -5,7 +5,7 @@ cmake_minimum_required(VERSION 4.0)
 cmake_policy(SET CMP0091 NEW)
 set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 
-project(md VERSION 0.1.0 LANGUAGES C CXX) # CXX only for HarfBuzz; app code is C
+project(md VERSION 0.2.0 LANGUAGES C CXX) # CXX only for HarfBuzz; app code is C
 
 if(NOT MSVC)
     message(WARNING "md targets the MSVC toolchain. Other compilers are only "

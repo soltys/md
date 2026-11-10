@@ -78,6 +78,7 @@ typedef struct Nvim {
     int top_line;            /* first visible buffer line (1-based), md_scroll */
     bool at_end;             /* the last buffer line is on screen (and not the first) */
     bool scrolled;
+    char notice[128];        /* md_notice text for a toast, "" when none */
 } Nvim;
 
 /* Starts the process on a background thread. `file` may be NULL. */
@@ -100,6 +101,8 @@ void nvim_input(Nvim *nv, const char *keys);
 void nvim_input_mouse(Nvim *nv, const char *button, const char *action,
                       const char *mods, int row, int col);
 void nvim_edit_file(Nvim *nv, const char *path);
+/* F5: re-reads the buffer's file unless it has unsaved changes. */
+void nvim_reload(Nvim *nv);
 /* Scrolls the editor so `line` (1-based) is at the top (viewer -> editor
  * sync); 0 shows the end of the file. */
 void nvim_scroll_to_line(Nvim *nv, int line);

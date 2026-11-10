@@ -252,6 +252,7 @@ static void exec_lua_notify(Nvim *nv, const char *code, const char *arg)
  * where the window is scrolled, for the live preview and scroll sync. */
 static const char attach_lua[] =
     "local ch = ...\n"
+    "vim.g.md_channel = ch\n"
     "local g = vim.api.nvim_create_augroup('md_ui', { clear = true })\n"
     "vim.api.nvim_create_autocmd({ 'TextChanged', 'TextChangedI', 'TextChangedP', 'BufWinEnter', 'BufWritePost' }, {\n"
     "  group = g, callback = function() vim.rpcnotify(ch, 'md_changed') end })\n"
@@ -324,6 +325,24 @@ void nvim_input_mouse(Nvim *nv, const char *button, const char *action,
 void nvim_edit_file(Nvim *nv, const char *path)
 {
     exec_lua_notify(nv, "vim.cmd.edit(vim.fn.fnameescape(...))", path);
+}
+
+void nvim_reload(Nvim *nv)
+{
+    if (!nv->attached) return;
+    /* Re-reads the file unless that would throw away unsaved edits; the
+     * answer comes back as an md_notice for a toast. */
+    exec_lua_notify(nv,
+        "local ch = vim.g.md_channel\n"
+        "local function say(m) if ch then vim.rpcnotify(ch, 'md_notice', m) end end\n"
+        "if vim.api.nvim_buf_get_name(0) == '' then return say('No file to reload') end\n"
+        "if vim.bo.modified then return say('Not reloaded: the editor has unsaved changes') end\n"
+        "local view = vim.fn.winsaveview()\n"
+        "local ok, err = pcall(vim.cmd, 'silent edit')\n"
+        "vim.fn.winrestview(view)\n"
+        "if ch then vim.rpcnotify(ch, 'md_changed') end\n"
+        "say(ok and ('Reloaded ' .. vim.fn.expand('%:t')) or ('Reload failed: ' .. tostring(err)))\n",
+        NULL);
 }
 
 void nvim_scroll_to_line(Nvim *nv, int line)
@@ -608,6 +627,14 @@ bool nvim_process(Nvim *nv)
             } else if (mp_str_eq(method, "md_changed")) {
                 nv->text_changed = true;
                 changed = true;
+            } else if (mp_str_eq(method, "md_notice")) {
+                const MpObj *msg = mp_at(mp_at(m, 2), 0);
+                if (msg && msg->type == MP_STR) {
+                    size_t n = SDL_min(msg->len, sizeof nv->notice - 1);
+                    SDL_memcpy(nv->notice, msg->v.s, n);
+                    nv->notice[n] = 0;
+                    changed = true;
+                }
             } else if (mp_str_eq(method, "md_scroll")) {
                 const MpObj *args = mp_at(m, 2);
                 const MpObj *end = mp_at(args, 1);

@@ -21,6 +21,8 @@ void images_init(Uint32 wake_event);
 Image *images_get(const char *doc_path, const char *url, size_t url_len);
 /* Uploads finished decodes to textures; true if any image changed. */
 bool images_pump(SDL_Renderer *r);
+/* True while any image is still being decoded (or not yet uploaded). */
+bool images_loading(void);
 void images_shutdown(void);
 
 #endif

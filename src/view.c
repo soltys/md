@@ -992,6 +992,75 @@ void view_draw(View *v, SDL_Renderer *r)
     view_draw_selection(v, r);
 }
 
+/* F12: the whole document as one image, at the viewer's width and scale.
+ * Drawn in strips through a target texture so long documents fit the
+ * renderer's texture size limit; the strips are copied into one surface. */
+void view_layout_all(View *v)
+{
+    if (v->doc && !v->doc->error) layout_until(v, v->item_count, 0);
+}
+
+SDL_Surface *view_render_surface(View *v, SDL_Renderer *r, const char **error)
+{
+    *error = NULL;
+    if (!v->doc || v->doc->error || v->doc->block_count == 0) { *error = "Nothing to render"; return NULL; }
+    layout_until(v, v->item_count, 0);
+    const int w = (int)SDL_ceilf(v->width);
+    int h = (int)SDL_ceilf(v->content_height);
+    if (w <= 0 || h <= 0) { *error = "Nothing to render"; return NULL; }
+    const int max_h = 100000; /* ~400 MB at 1000 px wide: plenty, still sane */
+    if (h > max_h) h = max_h;
+
+    int tile = (int)SDL_GetNumberProperty(SDL_GetRendererProperties(r),
+                                          SDL_PROP_RENDERER_MAX_TEXTURE_SIZE_NUMBER, 4096);
+    if (tile <= 0 || tile > 4096) tile = 4096;
+    if (w > tile) { *error = "The window is too wide to render"; return NULL; }
+    tile = SDL_min(tile, h);
+
+    SDL_Surface *out = SDL_CreateSurface(w, h, SDL_PIXELFORMAT_RGBA32);
+    SDL_Texture *tex = SDL_CreateTexture(r, SDL_PIXELFORMAT_RGBA32, SDL_TEXTUREACCESS_TARGET, w, tile);
+    if (!out || !tex) {
+        SDL_DestroySurface(out);
+        SDL_DestroyTexture(tex);
+        *error = "Not enough memory for the image";
+        return NULL;
+    }
+
+    SDL_Texture *old_target = SDL_GetRenderTarget(r);
+    SDL_Rect old_vp;
+    SDL_GetRenderViewport(r, &old_vp);
+    const float old_scroll = v->scroll, old_height = v->height;
+    const bool old_sel = v->has_sel;
+    v->has_sel = false; /* no selection highlight in the picture */
+
+    SDL_SetRenderTarget(r, tex);
+    SDL_SetRenderViewport(r, NULL);
+    for (int y = 0; y < h && !*error; y += tile) {
+        const int th = SDL_min(tile, h - y);
+        set_color(r, v->theme.bg);
+        SDL_RenderClear(r);
+        v->scroll = (float)y;
+        v->height = (float)th;
+        view_draw(v, r);
+        SDL_Rect strip = {0, 0, w, th};
+        SDL_Surface *px = SDL_RenderReadPixels(r, &strip);
+        SDL_Rect dst = {0, y, w, th};
+        if (!px || !SDL_BlitSurface(px, NULL, out, &dst)) *error = SDL_GetError();
+        SDL_DestroySurface(px);
+    }
+    SDL_SetRenderTarget(r, old_target);
+    SDL_SetRenderViewport(r, &old_vp);
+    v->scroll = old_scroll;
+    v->height = old_height;
+    v->has_sel = old_sel;
+    SDL_DestroyTexture(tex);
+    if (*error) {
+        SDL_DestroySurface(out);
+        return NULL;
+    }
+    return out;
+}
+
 static bool para_link_at(View *v, const Para *p, float ox, float oy, float x, float y,
                          const char **url, size_t *len)
 {
