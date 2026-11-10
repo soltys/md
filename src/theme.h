@@ -21,8 +21,8 @@ typedef struct Theme {
 } Theme;
 
 /* Code blocks use Catppuccin Mocha (https://catppuccin.com/palette/) in
- * both themes, matching the editor pane. Roles follow Catppuccin's style
- * guide. */
+ * both themes, matching the editor pane. Roles follow catppuccin/nvim's
+ * lua/catppuccin/groups/treesitter.lua (see class_for in highlight.c). */
 #define MOCHA(hex) {(Uint8)((hex) >> 16), (Uint8)(((hex) >> 8) & 0xFF), (Uint8)((hex) & 0xFF), 0xFF}
 #define MOCHA_CODE \
     .block_bg    = MOCHA(0x1E1E2E), /* base */ \
@@ -40,8 +40,14 @@ typedef struct Theme {
         [HL_OPERATOR]         = MOCHA(0x89DCEB), /* sky */ \
         [HL_PUNCTUATION]      = MOCHA(0x9399B2), /* overlay2 */ \
         [HL_PROPERTY]         = MOCHA(0xB4BEFE), /* lavender */ \
-        [HL_TAG]              = MOCHA(0xCBA6F7), /* mauve */ \
+        [HL_TAG]              = MOCHA(0x89B4FA), /* blue */ \
         [HL_ATTRIBUTE]        = MOCHA(0xF9E2AF), /* yellow */ \
+        [HL_PARAMETER]        = MOCHA(0xEBA0AC), /* maroon */ \
+        [HL_FUNCTION_BUILTIN] = MOCHA(0xFAB387), /* peach */ \
+        [HL_SPECIAL]          = MOCHA(0xF5C2E7), /* pink */ \
+        [HL_CHARACTER]        = MOCHA(0x94E2D5), /* teal */ \
+        [HL_LABEL]            = MOCHA(0x74C7EC), /* sapphire */ \
+        [HL_SYMBOL]           = MOCHA(0xF2CDCD), /* flamingo */ \
     }
 
 static const Theme THEME_LIGHT = {

@@ -61,25 +61,79 @@ static Lang *find_lang(const char *name, size_t n)
     return NULL;
 }
 
+/* A capture that colours nothing: plain variables. Not letting them claim
+ * bytes matters because queries written for Neovim list `(identifier)
+ * @variable` first and expect later, more specific patterns to win. */
+#define HL_SKIP 0xFF
+
+/* Capture name -> class, following Catppuccin's tree-sitter groups. The
+ * most specific name comes first; "a.b" also matches "a.b.c". Older
+ * nvim-treesitter names (@include, @repeat, @field, ...) are mapped too. */
+static const struct { const char *name; uint8_t cls; } CAPTURES[] = {
+    {"variable.builtin", HL_VARIABLE_BUILTIN},
+    {"variable.parameter", HL_PARAMETER},
+    {"variable.member", HL_PROPERTY},
+    {"variable", HL_SKIP},
+    {"parameter", HL_PARAMETER},
+    {"field", HL_PROPERTY},
+    {"property", HL_PROPERTY},
+    {"constant.macro", HL_KEYWORD},
+    {"constant", HL_CONSTANT},
+    {"module", HL_TYPE},
+    {"namespace", HL_TYPE},
+    {"label", HL_LABEL},
+    {"string.documentation", HL_CHARACTER},
+    {"string.regexp", HL_SPECIAL},
+    {"string.regex", HL_SPECIAL},
+    {"string.escape", HL_SPECIAL},
+    {"string.special.symbol", HL_SYMBOL},
+    {"string.special.url", HL_FUNCTION},
+    {"string.special", HL_SPECIAL},
+    {"string", HL_STRING},
+    {"escape", HL_SPECIAL},
+    {"embedded", HL_NONE},
+    {"character.special", HL_SPECIAL},
+    {"character", HL_CHARACTER},
+    {"boolean", HL_NUMBER},
+    {"number", HL_NUMBER},
+    {"float", HL_NUMBER},
+    {"type.builtin", HL_KEYWORD},
+    {"type", HL_TYPE},
+    {"storageclass", HL_TYPE},
+    {"structure", HL_TYPE},
+    {"attribute", HL_CONSTANT},
+    {"function.builtin", HL_FUNCTION_BUILTIN},
+    {"function.macro", HL_SPECIAL},
+    {"function", HL_FUNCTION},
+    {"method", HL_FUNCTION},
+    {"constructor", HL_TYPE},
+    {"keyword.conditional.ternary", HL_OPERATOR},
+    {"keyword.directive", HL_SPECIAL},
+    {"keyword", HL_KEYWORD},
+    {"preproc", HL_SPECIAL},
+    {"define", HL_SPECIAL},
+    {"include", HL_KEYWORD},
+    {"repeat", HL_KEYWORD},
+    {"conditional", HL_KEYWORD},
+    {"exception", HL_KEYWORD},
+    {"operator", HL_OPERATOR},
+    {"punctuation.special", HL_SPECIAL},
+    {"punctuation", HL_PUNCTUATION},
+    {"delimiter", HL_PUNCTUATION},
+    {"comment", HL_COMMENT},
+    {"tag.attribute", HL_ATTRIBUTE},
+    {"tag.delimiter", HL_CHARACTER},
+    {"tag", HL_TAG},
+};
+
 static uint8_t class_for(const char *name, uint32_t n)
 {
-    #define PFX(p) (n >= sizeof(p) - 1 && SDL_memcmp(name, p, sizeof(p) - 1) == 0)
-    if (PFX("comment")) return HL_COMMENT;
-    if (PFX("string") || PFX("escape") || PFX("character")) return HL_STRING;
-    if (PFX("keyword") || PFX("repeat") || PFX("conditional") || PFX("include") ||
-        PFX("preproc") || PFX("exception") || PFX("storageclass") || PFX("label")) return HL_KEYWORD;
-    if (PFX("number") || PFX("float") || PFX("boolean")) return HL_NUMBER;
-    if (PFX("constant")) return HL_CONSTANT;
-    if (PFX("function") || PFX("method") || PFX("constructor")) return HL_FUNCTION;
-    if (PFX("type") || PFX("module") || PFX("namespace")) return HL_TYPE;
-    if (PFX("variable.builtin")) return HL_VARIABLE_BUILTIN;
-    if (PFX("operator")) return HL_OPERATOR;
-    if (PFX("punctuation") || PFX("delimiter")) return HL_PUNCTUATION;
-    if (PFX("property") || PFX("field")) return HL_PROPERTY;
-    if (PFX("tag")) return HL_TAG;
-    if (PFX("attribute")) return HL_ATTRIBUTE;
+    for (size_t i = 0; i < SDL_arraysize(CAPTURES); ++i) {
+        size_t k = SDL_strlen(CAPTURES[i].name);
+        if (n >= k && SDL_memcmp(name, CAPTURES[i].name, k) == 0 && (n == k || name[k] == '.'))
+            return CAPTURES[i].cls;
+    }
     return HL_NONE;
-    #undef PFX
 }
 
 /* Compiles a language's query once; safe to race (loser frees its copy). */
@@ -284,6 +338,7 @@ void highlight_code(const char *lang, size_t lang_len, const char *code, size_t 
         if (!predicates_ok(q, &m, code)) continue;
         for (uint16_t i = 0; i < m.capture_count; ++i) {
             uint8_t c = classes[m.captures[i].index];
+            if (c == HL_SKIP) continue;
             uint32_t a = ts_node_start_byte(m.captures[i].node);
             uint32_t b = ts_node_end_byte(m.captures[i].node);
             if (b > len) b = (uint32_t)len;
