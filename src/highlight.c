@@ -17,6 +17,7 @@ GRAMMAR(bash)
 GRAMMAR(rust)
 GRAMMAR(c_sharp)
 GRAMMAR(lua)
+GRAMMAR(yaml)
 
 typedef struct Lang {
     const char *aliases;     /* space-separated, lower case */
@@ -27,13 +28,14 @@ typedef struct Lang {
     const size_t *base_query_len;
     void *compiled;          /* TSQuery*, set once (atomic) */
     void *classes;           /* uint8_t per capture id */
+    bool last_wins;          /* query written for Neovim: later patterns override */
 } Lang;
 
-#define L(id, aliases) {aliases, tree_sitter_##id, md_query_##id, &md_query_##id##_len, NULL, NULL, NULL, NULL}
+#define L(id, aliases) {aliases, tree_sitter_##id, md_query_##id, &md_query_##id##_len, NULL, NULL, NULL, NULL, false}
 static Lang langs[] = {
     L(c, "c h"),
     {"cpp c++ cc cxx hpp hh h++", tree_sitter_cpp, md_query_cpp, &md_query_cpp_len,
-     md_query_c, &md_query_c_len, NULL, NULL},
+     md_query_c, &md_query_c_len, NULL, NULL, false},
     L(python, "python py python3 py3 gyp"),
     L(javascript, "javascript js jsx mjs cjs node"),
     L(json, "json jsonc json5 geojson"),
@@ -41,6 +43,8 @@ static Lang langs[] = {
     L(rust, "rust rs"),
     L(c_sharp, "csharp cs c# c-sharp"),
     L(lua, "lua luau"),
+    /* tree-sitter-yaml lists the generic @string before the @property keys. */
+    {"yaml yml", tree_sitter_yaml, md_query_yaml, &md_query_yaml_len, NULL, NULL, NULL, NULL, true},
 };
 
 static Lang *find_lang(const char *name, size_t n)
@@ -344,7 +348,8 @@ void highlight_code(const char *lang, size_t lang_len, const char *code, size_t 
             if (b > len) b = (uint32_t)len;
             uint32_t sz = b - a;
             for (uint32_t k = a; k < b; ++k) {
-                if (sz < size[k] || (sz == size[k] && m.pattern_index < pat[k])) {
+                if (sz < size[k] || (sz == size[k] && (l->last_wins ? m.pattern_index >= pat[k]
+                                                                   : m.pattern_index < pat[k]))) {
                     cls[k] = c;
                     size[k] = sz;
                     pat[k] = m.pattern_index;

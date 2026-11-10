@@ -52,6 +52,7 @@ md_add_grammar(bash       https://github.com/tree-sitter/tree-sitter-bash.git   
 md_add_grammar(rust       https://github.com/tree-sitter/tree-sitter-rust.git       v0.24.2)
 md_add_grammar(c_sharp    https://github.com/tree-sitter/tree-sitter-c-sharp.git    v0.23.5)
 md_add_grammar(lua        https://github.com/tree-sitter-grammars/tree-sitter-lua.git v0.5.0)
+md_add_grammar(yaml       https://github.com/tree-sitter-grammars/tree-sitter-yaml.git v0.7.2)
 
 file(WRITE "${_queries_c}.tmp" "${_queries_body}")
 file(COPY_FILE "${_queries_c}.tmp" "${_queries_c}" ONLY_IF_DIFFERENT)

@@ -320,240 +320,34 @@ static void walk_table(Builder *bd, TSNode n, Ctx *ctx)
 
 /* ------------------------------------------------------ front matter -- */
 
-/* YAML front matter (--- ... --- at the top of the file) is shown as a
- * two-column table: one row per top-level key. Only the common subset of
- * YAML is understood, which is what front matter uses in practice:
- *   key: value            plain, 'single' or "double" quoted scalars
- *   key: [a, b]           flow lists          -> a, b (each as a code pill)
- *   key:\n  - a\n  - b     block lists         -> a, b (each as a code pill)
- *   key: | or >           block scalars       -> the lines joined
- *   key:\n  sub: x        nested maps         -> sub: x, ...
- * Comments and blank lines are skipped. Front matter with no key: value
- * line at all is shown as a YAML code block instead. */
-
-typedef struct FmLine { const char *s; uint32_t len; int indent; } FmLine;
-
-static const char *fm_trim(const char *s, uint32_t *len)
-{
-    while (*len && (*s == ' ' || *s == '\t')) { s++; (*len)--; }
-    while (*len && (s[*len - 1] == ' ' || s[*len - 1] == '\t' || s[*len - 1] == '\r')) (*len)--;
-    return s;
-}
-
-/* Strips a trailing " # comment" outside quotes. */
-static void fm_strip_comment(const char *s, uint32_t *len)
-{
-    char quote = 0;
-    for (uint32_t i = 0; i < *len; ++i) {
-        char c = s[i];
-        if (quote) { if (c == quote) quote = 0; continue; }
-        if (c == '\'' || c == '"') quote = c;
-        else if (c == '#' && (i == 0 || s[i - 1] == ' ' || s[i - 1] == '\t')) { *len = i; break; }
-    }
-    while (*len && (s[*len - 1] == ' ' || s[*len - 1] == '\t')) (*len)--;
-}
-
-/* A scalar without its quotes; double-quoted escapes \" \\ \n \t. */
-static void fm_scalar(Document *doc, const char *s, uint32_t len)
-{
-    s = fm_trim(s, &len);
-    if (len >= 2 && s[0] == '\'' && s[len - 1] == '\'') {
-        for (uint32_t i = 1; i + 1 < len; ++i) {
-            str_append(doc, s + i, 1);
-            if (s[i] == '\'' && s[i + 1] == '\'') i++; /* '' -> ' */
-        }
-    } else if (len >= 2 && s[0] == '"' && s[len - 1] == '"') {
-        for (uint32_t i = 1; i + 1 < len; ++i) {
-            if (s[i] == '\\' && i + 2 < len) {
-                char e = s[++i];
-                str_append(doc, e == 'n' ? " " : e == 't' ? " " : &s[i], 1);
-            } else {
-                str_append(doc, s + i, 1);
-            }
-        }
-    } else {
-        str_append(doc, s, len);
-    }
-}
-
-static void fm_pill(Document *doc, uint32_t cell_text, const char *s, uint32_t len, bool *first)
-{
-    if (!*first) str_append(doc, ", ", 2);
-    *first = false;
-    uint32_t start = (uint32_t)doc->strings_len - cell_text;
-    fm_scalar(doc, s, len);
-    uint32_t end = (uint32_t)doc->strings_len - cell_text;
-    if (end == start) return;
-    GROW(doc->spans, doc->span_count, doc->span_cap, 256);
-    Span *sp = &doc->spans[doc->span_count++];
-    SDL_zerop(sp);
-    sp->start = start;
-    sp->len = end - start;
-    sp->style = ST_CODE;
-}
-
-static bool fm_blank(const FmLine *l)
-{
-    uint32_t len = l->len;
-    fm_trim(l->s, &len);
-    return len == 0;
-}
-
-static void fm_cell(Document *doc, uint16_t row, uint16_t col, uint32_t text, uint32_t len,
-                    uint32_t span_first)
-{
-    GROW(doc->cells, doc->cell_count, doc->cell_cap, 64);
-    TableCell *tc = &doc->cells[doc->cell_count++];
-    SDL_zerop(tc);
-    tc->row = row;
-    tc->col = col;
-    tc->text = text;
-    tc->text_len = len;
-    tc->span_first = span_first;
-    tc->span_count = doc->span_count - span_first;
-}
-
+/* YAML front matter (--- ... --- at the top of the file) is shown as a YAML
+ * code block without the fences, highlighted like any fenced yaml block. */
 static void walk_front_matter(Builder *bd, TSNode n, Ctx *ctx)
 {
     Document *doc = bd->doc;
     uint32_t a = ts_node_start_byte(n), e = ts_node_end_byte(n);
-
-    /* Split into lines, dropping the --- fences. */
-    FmLine *lines = NULL;
-    uint32_t count = 0, cap = 0;
+    push_block(bd, BLOCK_CODE, n, ctx);
+    Block *b = &doc->blocks[doc->block_count - 1];
+    uint32_t begin = str_begin(doc);
+    bool any = false;
     for (uint32_t p = a; p < e;) {
         uint32_t q = p;
         while (q < e && doc->source[q] != '\n') q++;
         uint32_t len = q - p;
-        const char *s = doc->source + p;
-        uint32_t tl = len;
-        const char *t = fm_trim(s, &tl);
-        bool fence = (tl == 3 && (SDL_memcmp(t, "---", 3) == 0 || SDL_memcmp(t, "...", 3) == 0));
+        while (len && (doc->source[p + len - 1] == '\r' || doc->source[p + len - 1] == ' ')) len--;
+        bool fence = len == 3 && (SDL_memcmp(doc->source + p, "---", 3) == 0 ||
+                                  SDL_memcmp(doc->source + p, "...", 3) == 0);
         if (!fence) {
-            GROW(lines, count, cap, 32);
-            int indent = 0;
-            while (indent < (int)len && (s[indent] == ' ' || s[indent] == '\t')) indent++;
-            lines[count++] = (FmLine){s, len, indent};
+            if (any) str_append(doc, "\n", 1);
+            str_append(doc, doc->source + p, len);
+            any = true;
         }
         p = q + 1;
     }
-
-    /* Does it have any "key:" line? Otherwise show it verbatim. */
-    bool any = false;
-    for (uint32_t i = 0; i < count && !any; ++i) {
-        uint32_t len = lines[i].len;
-        const char *t = fm_trim(lines[i].s, &len);
-        if (lines[i].indent == 0 && len && t[0] != '#' && t[0] != '-') {
-            for (uint32_t k = 0; k < len; ++k) if (t[k] == ':' && (k + 1 == len || t[k + 1] == ' ')) { any = true; break; }
-        }
-    }
-    if (!any) {
-        push_block(bd, BLOCK_CODE, n, ctx);
-        Block *b = &doc->blocks[doc->block_count - 1];
-        uint32_t begin = str_begin(doc);
-        for (uint32_t i = 0; i < count; ++i) {
-            str_append(doc, lines[i].s, lines[i].len);
-            if (i + 1 < count) str_append(doc, "\n", 1);
-        }
-        b->text = begin;
-        b->text_len = str_end(doc, begin);
-        b->lang = str_add(doc, "yaml", 4, &b->lang_len);
-        SDL_free(lines);
-        return;
-    }
-
-    push_block(bd, BLOCK_TABLE, n, ctx);
-    int bi = doc->block_count - 1;
-    doc->blocks[bi].cell_first = doc->cell_count;
-    uint16_t row = 0;
-    uint32_t sf = doc->span_count, tl;
-    uint32_t t0 = str_add(doc, "Field", 5, &tl);
-    fm_cell(doc, row, 0, t0, tl, sf);
-    t0 = str_add(doc, "Value", 5, &tl);
-    fm_cell(doc, row, 1, t0, tl, sf);
-    row++;
-
-    for (uint32_t i = 0; i < count;) {
-        uint32_t len = lines[i].len;
-        const char *t = fm_trim(lines[i].s, &len);
-        if (!len || t[0] == '#' || lines[i].indent > 0) { i++; continue; }
-        uint32_t colon = 0;
-        while (colon < len && !(t[colon] == ':' && (colon + 1 == len || t[colon + 1] == ' '))) colon++;
-        if (colon == len) { i++; continue; } /* not a key line */
-
-        /* Key */
-        uint32_t ks = str_begin(doc);
-        sf = doc->span_count;
-        fm_scalar(doc, t, colon);
-        uint32_t kl = str_end(doc, ks);
-        fm_cell(doc, row, 0, ks, kl, sf);
-
-        /* Value */
-        const char *v = t + colon + 1;
-        uint32_t vl = len - colon - 1;
-        fm_strip_comment(v, &vl);
-        v = fm_trim(v, &vl);
-        uint32_t vs = str_begin(doc);
-        sf = doc->span_count;
-        i++;
-        if (vl >= 2 && v[0] == '[' && v[vl - 1] == ']') { /* flow list */
-            bool first = true;
-            uint32_t p = 1;
-            while (p < vl - 1) {
-                uint32_t q = p;
-                char quote = 0;
-                while (q < vl - 1 && (quote || v[q] != ',')) {
-                    if (quote && v[q] == quote) quote = 0;
-                    else if (!quote && (v[q] == '\'' || v[q] == '"')) quote = v[q];
-                    q++;
-                }
-                uint32_t il = q - p;
-                const char *it = fm_trim(v + p, &il);
-                if (il) fm_pill(doc, vs, it, il, &first);
-                p = q + 1;
-            }
-        } else if (vl && (v[0] == '|' || v[0] == '>')) { /* block scalar */
-            bool first = true;
-            while (i < count && (lines[i].indent > 0 || fm_blank(&lines[i]))) {
-                uint32_t ll = lines[i].len;
-                const char *l = fm_trim(lines[i].s, &ll);
-                if (ll) {
-                    if (!first) str_append(doc, " ", 1);
-                    str_append(doc, l, ll);
-                    first = false;
-                }
-                i++;
-            }
-        } else if (vl) {
-            fm_scalar(doc, v, vl);
-        } else { /* block list or nested map on the following lines */
-            bool first = true;
-            while (i < count) {
-                uint32_t ll = lines[i].len;
-                const char *l = fm_trim(lines[i].s, &ll);
-                if (ll && lines[i].indent == 0 && l[0] != '-') break;
-                i++;
-                if (!ll || l[0] == '#') continue;
-                fm_strip_comment(l, &ll);
-                if (l[0] == '-' && (ll == 1 || l[1] == ' ')) {
-                    uint32_t il = ll - 1;
-                    const char *it = fm_trim(l + 1, &il);
-                    fm_pill(doc, vs, it, il, &first);
-                } else {
-                    if (!first) str_append(doc, ", ", 2);
-                    first = false;
-                    str_append(doc, l, ll);
-                }
-            }
-        }
-        uint32_t vlen = str_end(doc, vs);
-        fm_cell(doc, row, 1, vs, vlen, sf);
-        row++;
-    }
-    SDL_free(lines);
-    doc->blocks[bi].rows = row;
-    doc->blocks[bi].cols = 2;
-    doc->blocks[bi].cell_count = doc->cell_count - doc->blocks[bi].cell_first;
+    b = &doc->blocks[doc->block_count - 1];
+    b->text = begin;
+    b->text_len = str_end(doc, begin);
+    b->lang = str_add(doc, "yaml", 4, &b->lang_len);
 }
 
 static void walk(Builder *bd, TSNode n, Ctx *ctx)

@@ -134,13 +134,13 @@ unsaved changes are never dropped silently.
 * Links (inline, reference, autolinks, e-mail); click to open, `.md` links
   open in md
 * Tables with column alignment and inline formatting in cells
-* YAML front matter shown as a key / value table (see docs/features.md)
+* YAML front matter shown as a highlighted YAML block (see docs/features.md)
 * Images (PNG, JPG, GIF, BMP, SVG, QOI, ...) loaded in the background,
   relative to the document; remote images show their alt text
 * Emoji including ZWJ sequences, skin tones, flags and keycaps
   (Noto Color Emoji)
 * Fenced code with syntax highlighting (tree-sitter) for C, C++, C#, Python,
-  JavaScript, JSON, Bash, Rust and Lua, in Catppuccin colours (Latte light, Mocha dark)
+  JavaScript, JSON, Bash, Rust, Lua and YAML, in Catppuccin colours (Latte light, Mocha dark)
 * Light/dark theme following Windows
 
 ## ![](art/png/pencil@3x.png) Neovim config
