@@ -22,6 +22,51 @@ vim.o.tabstop = 2
 vim.o.swapfile = false       -- md owns the file; avoid swap prompts
 vim.o.updatetime = 200       -- quicker CursorHold for preview sync later
 
+-- Clipboard ----------------------------------------------------------------
+-- y / d / p use the Windows clipboard, so text moves freely between the
+-- editor, the preview (Ctrl+C there) and other programs.
+-- Done after startup, so the PATH lookup and the provider stay off the
+-- cold-start path; the provider itself loads on first use.
+vim.schedule(function()
+  if vim.fn.has("win32") == 1 then
+    if vim.fn.executable("win32yank.exe") == 1 then
+      -- Shipped with the Neovim Windows release: fast, and converts line
+      -- endings (CRLF on the clipboard, LF in the buffer).
+      vim.g.clipboard = {
+        name = "win32yank",
+        copy = {
+          ["+"] = { "win32yank.exe", "-i", "--crlf" },
+          ["*"] = { "win32yank.exe", "-i", "--crlf" },
+        },
+        paste = {
+          ["+"] = { "win32yank.exe", "-o", "--lf" },
+          ["*"] = { "win32yank.exe", "-o", "--lf" },
+        },
+        cache_enabled = 0,
+      }
+    else
+      -- Fallback: PowerShell (slower to start), forced to UTF-8 both ways so
+      -- non-ASCII text survives (clip.exe would mangle it).
+      local ps = { "powershell.exe", "-NoLogo", "-NoProfile", "-NonInteractive", "-Command" }
+      local copy = vim.list_extend(vim.deepcopy(ps), {
+        "[Console]::InputEncoding = [Text.Encoding]::UTF8;"
+          .. " Set-Clipboard -Value ([Console]::In.ReadToEnd())",
+      })
+      local paste = vim.list_extend(vim.deepcopy(ps), {
+        "[Console]::OutputEncoding = [Text.Encoding]::UTF8;"
+          .. " $t = Get-Clipboard -Raw; if ($t) { [Console]::Out.Write($t.Replace([string][char]13, '')) }",
+      })
+      vim.g.clipboard = {
+        name = "powershell",
+        copy = { ["+"] = copy, ["*"] = copy },
+        paste = { ["+"] = paste, ["*"] = paste },
+        cache_enabled = 0,
+      }
+    end
+  end
+  vim.o.clipboard = "unnamedplus"
+end)
+
 -- Plugins ------------------------------------------------------------------
 -- First run clones catppuccin into stdpath("data")/site/pack/core/opt.
 -- Later runs only add it to 'runtimepath' (no network).

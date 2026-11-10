@@ -147,6 +147,9 @@ unsaved changes are never dropped silently.
 0.12+). It sets a few prose-friendly options and installs the
 [catppuccin](https://github.com/catppuccin/nvim) colorscheme through the
 built-in `vim.pack`, using the Mocha flavour with brighter line numbers.
+Yank, delete and put use the Windows clipboard (`clipboard=unnamedplus`)
+through `win32yank.exe`, which comes with the Neovim Windows release. If
+that is not on PATH, PowerShell is used instead (slower, UTF-8 safe).
 
 The file is compiled into `md.exe`. On startup md writes it to
 `%APPDATA%\md\init.lua` (only when it changed) and starts, in the background,
