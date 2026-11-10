@@ -47,6 +47,8 @@ add_executable(md WIN32
     src/msgpack.h
     src/editor.c
     src/editor.h
+    src/cli.c
+    src/cli.h
     src/clipboard.c
     src/clipboard.h
     src/emoji.c
@@ -66,6 +68,10 @@ set(MD_NVIM_INIT "${CMAKE_CURRENT_SOURCE_DIR}/nvim/init.lua")
 set(MD_APP_ICON_FILE "${CMAKE_CURRENT_SOURCE_DIR}/art/png/md-icon.ico")
 
 target_include_directories(md PRIVATE src "${CMAKE_CURRENT_BINARY_DIR}/generated")
+# The version comes from project() above; md --version prints it and on
+# Windows it is also in the file's properties (Details tab).
+target_compile_definitions(md PRIVATE MD_VERSION="${PROJECT_VERSION}")
+
 target_link_libraries(md PRIVATE
     SDL3::SDL3-static
     SDL3_ttf::SDL3_ttf-static

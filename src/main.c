@@ -14,6 +14,7 @@
 #include <SDL3_ttf/SDL_ttf.h>
 
 #include "app.h"
+#include "cli.h"
 #include "clipboard.h"
 #include "document.h"
 #include "editor.h"
@@ -1257,13 +1258,12 @@ static void sync_editor_to_viewer(void)
 
 int main(int argc, char **argv)
 {
-    /* md [-e | --edit] [file.md] */
-    const char *file = NULL;
-    bool edit = false;
-    for (int i = 1; i < argc; ++i) {
-        if (SDL_strcmp(argv[i], "-e") == 0 || SDL_strcmp(argv[i], "--edit") == 0) edit = true;
-        else if (!file) file = argv[i];
-    }
+    /* md [-e | --edit] [file.md]; --help and --version end here. */
+    CliOptions opts;
+    int status = cli_parse(argc, argv, &opts);
+    if (status >= 0) return status;
+    const char *file = opts.file;
+    const bool edit = opts.edit;
 
     /* 1. Kick off background work before touching the window system. */
     app.font_thread = SDL_CreateThread(font_thread_main, "md-fonts", NULL);

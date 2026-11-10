@@ -76,7 +76,14 @@ Changing `CMAKE_INSTALL_PREFIX` when configuring also changes the default.
 ```
 md.exe file.md          # viewer only
 md.exe -e file.md       # editor open from the start (also --edit)
+md.exe --help           # every option and shortcut (also -h, /?)
+md.exe --version        # version from CMakeLists.txt project() (also -V)
 ```
+
+md.exe is a Windows GUI program, so `--help` and `--version` print to the
+console md was started from (or to a file / pipe when redirected:
+`md --help | more`), and show a message box when there is no console. The
+version is also in the exe's file properties.
 
 md opens as a **viewer**: just the rendered Markdown. Press Ctrl+Shift+S (or
 start md with `-e`) to start Neovim and bring it in beside the preview. Neovim is only launched when

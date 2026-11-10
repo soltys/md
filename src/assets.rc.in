@@ -1,5 +1,31 @@
 // Generated from src/assets.rc.in by CMake. Do not edit the generated copy.
 #include "asset_ids.h"
+#include <winver.h>
+
+/* File version, from project(md VERSION ...) in CMakeLists.txt. */
+1 VERSIONINFO
+FILEVERSION     @PROJECT_VERSION_MAJOR@,@PROJECT_VERSION_MINOR@,@PROJECT_VERSION_PATCH@,0
+PRODUCTVERSION  @PROJECT_VERSION_MAJOR@,@PROJECT_VERSION_MINOR@,@PROJECT_VERSION_PATCH@,0
+FILEOS          VOS_NT_WINDOWS32
+FILETYPE        VFT_APP
+BEGIN
+    BLOCK "StringFileInfo"
+    BEGIN
+        BLOCK "040904B0"
+        BEGIN
+            VALUE "FileDescription",  "md - Markdown viewer and editor"
+            VALUE "FileVersion",      "@PROJECT_VERSION@"
+            VALUE "ProductName",      "md"
+            VALUE "ProductVersion",   "@PROJECT_VERSION@"
+            VALUE "OriginalFilename", "md.exe"
+            VALUE "InternalName",     "md"
+        END
+    END
+    BLOCK "VarFileInfo"
+    BEGIN
+        VALUE "Translation", 0x0409, 1200
+    END
+END
 
 MD_APP_ICON              ICON   "@MD_APP_ICON_FILE@"
 
