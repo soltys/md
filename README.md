@@ -76,6 +76,7 @@ Changing `CMAKE_INSTALL_PREFIX` when configuring also changes the default.
 ```
 md.exe file.md          # viewer only
 md.exe -e file.md       # editor open from the start (also --edit)
+md.exe --dark file.md   # force the dark theme (--light, -d, -l, --theme=system)
 md.exe --help           # every option and shortcut (also -h, /?)
 md.exe --version        # version from CMakeLists.txt project() (also -V)
 ```
@@ -102,6 +103,7 @@ open it in md to try it out.
 | F1 | Show / hide a list of all shortcuts |
 | F2 | Copy the full path of the open file |
 | F5 | Reload the file from disk (through Neovim when it runs; unsaved edits are kept) |
+| F8 | Switch between the light and dark theme (also `--light` / `--dark`) |
 | F12 | Save the whole rendered document as a PNG image |
 | Ctrl+Shift+O | Switch split orientation (side by side / stacked) |
 | Ctrl+Shift+S | Split on/off (off = preview only, the default) |

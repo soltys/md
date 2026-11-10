@@ -77,6 +77,7 @@ typedef struct App {
     SelPos search_origin;
     float search_scroll0;
     bool dark;
+    bool theme_forced;        /* --light / --dark: ignore the system theme */
     bool dirty;
     bool quitting;
 } App;

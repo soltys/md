@@ -42,6 +42,11 @@ static const char HELP[] =
 "                        while the window is being created, so this costs no\n"
 "                        extra time. Without -e md starts as a viewer and only\n"
 "                        launches Neovim when the editor is first asked for.\n"
+"    -l, --light         Use the light theme, whatever the Windows setting.\n"
+"    -d, --dark          Use the dark theme, whatever the Windows setting.\n"
+"    --theme=THEME       light, dark or system (the default: follow Windows'\n"
+"                        light / dark app mode, also when it changes while md\n"
+"                        runs). '--theme dark' works too. The last one wins.\n"
 "    -h, --help, /?      Show this help and exit.\n"
 "    -V, --version       Show the version and exit.\n"
 "    --                  Treat everything after this as a file name, even if it\n"
@@ -73,6 +78,8 @@ static const char HELP[] =
 "    F5                  Reload the file from disk, keeping the scroll position.\n"
 "                        With the editor running Neovim re-reads it, unless the\n"
 "                        buffer has unsaved changes (then nothing is reloaded)\n"
+"    F8                  Switch between the light and dark theme (md then\n"
+"                        stops following the Windows setting until restarted)\n"
 "    F12                 Save the whole rendered document as a PNG image (asks\n"
 "                        where). The image is as wide as the preview pane, at\n"
 "                        the display scale, in the current light / dark theme\n"
@@ -156,6 +163,7 @@ static const char HELP[] =
 "EXAMPLES\n"
 "    md README.md                View a file\n"
 "    md -e notes.md              Edit a file with the live preview beside it\n"
+"    md --dark README.md         View a file in the dark theme\n"
 "    mdv docs\\features.md        Same as md\n"
 "    md --help | more            Read this help page by page\n"
 "    md -- -strange-name.md      Open a file whose name starts with '-'\n"
@@ -228,7 +236,12 @@ int cli_parse(int argc, char **argv, CliOptions *out)
     for (int i = 1; i < argc; ++i) {
         const char *a = argv[i];
         if (!only_files && a[0] == '-' && a[1] != '\0') {
+            const char *theme = NULL;
             if (is(a, "-e", "--edit")) out->edit = true;
+            else if (is(a, "-l", "--light")) out->theme = CLI_THEME_LIGHT;
+            else if (is(a, "-d", "--dark")) out->theme = CLI_THEME_DARK;
+            else if (SDL_strncmp(a, "--theme=", 8) == 0) theme = a + 8;
+            else if (is(a, "--theme", NULL)) theme = i + 1 < argc ? argv[++i] : "";
             else if (is(a, "-h", "--help")) { print(HELP, false); return 0; }
             else if (is(a, "-V", "--version")) { print(VERSION, false); return 0; }
             else if (is(a, "--", NULL)) only_files = true;
@@ -238,6 +251,19 @@ int cli_parse(int argc, char **argv, CliOptions *out)
                 print(msg ? msg : "md: unknown option\n", true);
                 SDL_free(msg);
                 return 2;
+            }
+            if (theme) {
+                if (SDL_strcasecmp(theme, "light") == 0) out->theme = CLI_THEME_LIGHT;
+                else if (SDL_strcasecmp(theme, "dark") == 0) out->theme = CLI_THEME_DARK;
+                else if (SDL_strcasecmp(theme, "system") == 0 || SDL_strcasecmp(theme, "auto") == 0)
+                    out->theme = CLI_THEME_SYSTEM;
+                else {
+                    char *msg = NULL;
+                    SDL_asprintf(&msg, "md: unknown theme '%s' (use light, dark or system)\n", theme);
+                    print(msg ? msg : "md: unknown theme\n", true);
+                    SDL_free(msg);
+                    return 2;
+                }
             }
         } else if (!only_files && (is(a, "/?", "/h") || is(a, "/help", NULL))) {
             print(HELP, false);

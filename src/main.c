@@ -397,6 +397,7 @@ static const char *const HELP[][2] = {
     {"F1", "Show / hide this help"},
     {"F2", "Copy the full path of the file"},
     {"F5", "Reload the file from disk"},
+    {"F8", "Switch between light and dark theme"},
     {"F12", "Save the preview as a PNG image"},
     {NULL, "Layout"},
     {"Ctrl+Shift+S", "Editor beside the preview on / off"},
@@ -1091,6 +1092,19 @@ static void open_link(const char *url, size_t len)
     SDL_free(u);
 }
 
+/* Light / dark: the system theme, --light / --dark, or F8. */
+static void set_dark(bool dark)
+{
+    if (dark == app.dark || !app.fonts_ok) return;
+    app.dark = dark;
+    /* Colours are baked into texts at creation; rebuild them. */
+    Document *doc = app.view.doc;
+    app.view.doc = NULL;
+    app.view.theme = dark ? THEME_DARK : THEME_LIGHT;
+    view_set_document(&app.view, doc, true);
+    app.dirty = true;
+}
+
 /* ----------------------------------------------------- file actions -- */
 
 /* The open file's path as md knows it (may be relative), or NULL. */
@@ -1258,6 +1272,13 @@ static bool handle_event(const SDL_Event *e)
         if (!(e->key.mod & (SDL_KMOD_CTRL | SDL_KMOD_ALT | SDL_KMOD_SHIFT | SDL_KMOD_GUI))) {
             if (e->key.key == SDLK_F2) { copy_path(); break; }
             if (e->key.key == SDLK_F5) { reload_file(); break; }
+            if (e->key.key == SDLK_F8) {
+                /* From now on md keeps this choice, like --light / --dark. */
+                app.theme_forced = true;
+                set_dark(!app.dark);
+                show_toast(app.dark ? "Dark theme" : "Light theme");
+                break;
+            }
             if (e->key.key == SDLK_F12) { show_save_png_dialog(); break; }
         }
         if (app_shortcut(&e->key)) break;
@@ -1400,16 +1421,7 @@ static bool handle_event(const SDL_Event *e)
         app.dirty = true;
         break;
     case SDL_EVENT_SYSTEM_THEME_CHANGED: {
-        bool dark = SDL_GetSystemTheme() == SDL_SYSTEM_THEME_DARK;
-        if (dark != app.dark && app.fonts_ok) {
-            app.dark = dark;
-            /* Colours are baked into texts at creation; rebuild them. */
-            Document *doc = app.view.doc;
-            app.view.doc = NULL;
-            app.view.theme = dark ? THEME_DARK : THEME_LIGHT;
-            view_set_document(&app.view, doc, true);
-            app.dirty = true;
-        }
+        if (!app.theme_forced) set_dark(SDL_GetSystemTheme() == SDL_SYSTEM_THEME_DARK);
         break;
     }
     default:
@@ -1474,7 +1486,9 @@ int main(int argc, char **argv)
     }
     app.wake_event = SDL_RegisterEvents(1);
     images_init(app.wake_event);
-    app.dark = SDL_GetSystemTheme() == SDL_SYSTEM_THEME_DARK;
+    app.theme_forced = opts.theme != CLI_THEME_SYSTEM;
+    app.dark = app.theme_forced ? opts.theme == CLI_THEME_DARK
+                                : SDL_GetSystemTheme() == SDL_SYSTEM_THEME_DARK;
     /* Open as a viewer; Ctrl+Shift+S (or Ctrl+Shift+E) starts Neovim and
      * brings in the editor. */
     app.layout = LAYOUT_VIEWER;

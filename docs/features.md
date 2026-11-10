@@ -11,6 +11,7 @@ follows as you type.
 | `F1` | Show / hide a list of all shortcuts |
 | `F2` | Copy the full path of the open file |
 | `F5` | Reload the file from disk (through Neovim when it runs; unsaved edits are kept) |
+| `F8` | Switch between the light and dark theme (also `--light` / `--dark`) |
 | `F12` | Save the whole rendered document as a PNG image |
 | `Ctrl+Shift+O` | Switch the split between side by side and stacked |
 | `Ctrl+Shift+S` | Split on/off (off shows only the preview, the default) |
