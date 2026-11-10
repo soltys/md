@@ -404,7 +404,7 @@ static TextStyle body_style(const View *v, const Block *b)
     } else if (b->kind == BLOCK_CODE || b->kind == BLOCK_HTML) {
         ts.face = FONT_MONO;
         ts.px = BODY_PX * 0.875f * v->scale;
-        ts.color = v->theme.code_text;
+        ts.color = v->theme.block_text;
         ts.pre = true;
         ts.line_factor = 1.35f;
     }
@@ -529,7 +529,7 @@ static void layout_item(View *v, int idx)
         it->marker = layout_para(v, b->marker, b->marker_len, 0, 0, 1e9f, &ms);
     }
     if (b->lang_len) {
-        TextStyle ls = {FONT_MEDIUM, BODY_PX * 0.75f * s, v->theme.muted, false, 1.0f};
+        TextStyle ls = {FONT_MEDIUM, BODY_PX * 0.75f * s, v->theme.block_label, false, 1.0f};
         it->lang = layout_para(v, b->lang, b->lang_len, 0, 0, 1e9f, &ls);
     }
 
@@ -954,7 +954,7 @@ void view_draw(View *v, SDL_Renderer *r)
         case BLOCK_HTML: {
             float pad = CODE_PAD * s;
             SDL_FRect box = {it->x - pad, it->box_y + dy, it->w + 2 * pad, it->box_h};
-            set_color(r, th->code_bg);
+            set_color(r, th->block_bg);
             SDL_RenderFillRect(r, &box);
             if (it->lang.count) draw_para(v, r, &it->lang, it->x, it->box_y + dy + pad * 0.6f);
             /* Long lines are clipped to the box (no wrapping in code). */
@@ -1498,7 +1498,7 @@ static void html_open_block(HtmlState *h, const ViewItem *it, bool first_in_sele
         char pre[96];
         const Theme *th = &h->v->theme;
         SDL_snprintf(pre, sizeof pre, "<pre style=\"background:#%02x%02x%02x;color:#%02x%02x%02x;padding:8px\"><code>",
-                     th->code_bg.r, th->code_bg.g, th->code_bg.b, th->code_text.r, th->code_text.g, th->code_text.b);
+                     th->block_bg.r, th->block_bg.g, th->block_bg.b, th->block_text.r, th->block_text.g, th->block_text.b);
         str_cat(&h->s, pre);
     }
         h->block_close = "</code></pre>";

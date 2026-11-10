@@ -10,12 +10,39 @@ typedef struct Theme {
     SDL_Color muted;
     SDL_Color heading;
     SDL_Color rule;
-    SDL_Color code_bg;
+    SDL_Color code_bg;        /* inline code, table stripes, search bar */
     SDL_Color code_text;
+    SDL_Color block_bg;       /* fenced / indented code blocks */
+    SDL_Color block_text;
+    SDL_Color block_label;    /* the language name above a block */
     SDL_Color quote_bar;
     SDL_Color accent;
     SDL_Color syntax[HL_COUNT];
 } Theme;
+
+/* Code blocks use Catppuccin Mocha (https://catppuccin.com/palette/) in
+ * both themes, matching the editor pane. Roles follow Catppuccin's style
+ * guide. */
+#define MOCHA(hex) {(Uint8)((hex) >> 16), (Uint8)(((hex) >> 8) & 0xFF), (Uint8)((hex) & 0xFF), 0xFF}
+#define MOCHA_CODE \
+    .block_bg    = MOCHA(0x1E1E2E), /* base */ \
+    .block_text  = MOCHA(0xCDD6F4), /* text */ \
+    .block_label = MOCHA(0x7F849C), /* overlay1 */ \
+    .syntax = { \
+        [HL_KEYWORD]          = MOCHA(0xCBA6F7), /* mauve */ \
+        [HL_STRING]           = MOCHA(0xA6E3A1), /* green */ \
+        [HL_COMMENT]          = MOCHA(0x9399B2), /* overlay2 */ \
+        [HL_NUMBER]           = MOCHA(0xFAB387), /* peach */ \
+        [HL_CONSTANT]         = MOCHA(0xFAB387), /* peach */ \
+        [HL_FUNCTION]         = MOCHA(0x89B4FA), /* blue */ \
+        [HL_TYPE]             = MOCHA(0xF9E2AF), /* yellow */ \
+        [HL_VARIABLE_BUILTIN] = MOCHA(0xF38BA8), /* red */ \
+        [HL_OPERATOR]         = MOCHA(0x89DCEB), /* sky */ \
+        [HL_PUNCTUATION]      = MOCHA(0x9399B2), /* overlay2 */ \
+        [HL_PROPERTY]         = MOCHA(0xB4BEFE), /* lavender */ \
+        [HL_TAG]              = MOCHA(0xCBA6F7), /* mauve */ \
+        [HL_ATTRIBUTE]        = MOCHA(0xF9E2AF), /* yellow */ \
+    }
 
 static const Theme THEME_LIGHT = {
     .bg        = {0xFF, 0xFF, 0xFF, 0xFF},
@@ -27,21 +54,7 @@ static const Theme THEME_LIGHT = {
     .code_text = {0x1F, 0x23, 0x28, 0xFF},
     .quote_bar = {0xD0, 0xD7, 0xDE, 0xFF},
     .accent    = {0x09, 0x69, 0xDA, 0xFF},
-    .syntax = {
-        [HL_KEYWORD]          = {0xCF, 0x22, 0x2E, 0xFF},
-        [HL_STRING]           = {0x0A, 0x30, 0x69, 0xFF},
-        [HL_COMMENT]          = {0x59, 0x63, 0x6E, 0xFF},
-        [HL_NUMBER]           = {0x05, 0x50, 0xAE, 0xFF},
-        [HL_CONSTANT]         = {0x05, 0x50, 0xAE, 0xFF},
-        [HL_FUNCTION]         = {0x82, 0x50, 0xDF, 0xFF},
-        [HL_TYPE]             = {0x95, 0x38, 0x00, 0xFF},
-        [HL_VARIABLE_BUILTIN] = {0x05, 0x50, 0xAE, 0xFF},
-        [HL_OPERATOR]         = {0xCF, 0x22, 0x2E, 0xFF},
-        [HL_PUNCTUATION]      = {0x1F, 0x23, 0x28, 0xFF},
-        [HL_PROPERTY]         = {0x05, 0x50, 0xAE, 0xFF},
-        [HL_TAG]              = {0x11, 0x63, 0x29, 0xFF},
-        [HL_ATTRIBUTE]        = {0x05, 0x50, 0xAE, 0xFF},
-    },
+    MOCHA_CODE,
 };
 
 static const Theme THEME_DARK = {
@@ -54,21 +67,7 @@ static const Theme THEME_DARK = {
     .code_text = {0xE6, 0xED, 0xF3, 0xFF},
     .quote_bar = {0x3D, 0x44, 0x4D, 0xFF},
     .accent    = {0x47, 0x8B, 0xE6, 0xFF},
-    .syntax = {
-        [HL_KEYWORD]          = {0xFF, 0x7B, 0x72, 0xFF},
-        [HL_STRING]           = {0xA5, 0xD6, 0xFF, 0xFF},
-        [HL_COMMENT]          = {0x8B, 0x94, 0x9E, 0xFF},
-        [HL_NUMBER]           = {0x79, 0xC0, 0xFF, 0xFF},
-        [HL_CONSTANT]         = {0x79, 0xC0, 0xFF, 0xFF},
-        [HL_FUNCTION]         = {0xD2, 0xA8, 0xFF, 0xFF},
-        [HL_TYPE]             = {0xFF, 0xA6, 0x57, 0xFF},
-        [HL_VARIABLE_BUILTIN] = {0x79, 0xC0, 0xFF, 0xFF},
-        [HL_OPERATOR]         = {0xFF, 0x7B, 0x72, 0xFF},
-        [HL_PUNCTUATION]      = {0xE6, 0xED, 0xF3, 0xFF},
-        [HL_PROPERTY]         = {0x79, 0xC0, 0xFF, 0xFF},
-        [HL_TAG]              = {0x7E, 0xE7, 0x87, 0xFF},
-        [HL_ATTRIBUTE]        = {0x79, 0xC0, 0xFF, 0xFF},
-    },
+    MOCHA_CODE,
 };
 
 #endif

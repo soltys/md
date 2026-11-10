@@ -135,7 +135,7 @@ unsaved changes are never dropped silently.
 * Emoji including ZWJ sequences, skin tones, flags and keycaps
   (Noto Color Emoji)
 * Fenced code with syntax highlighting (tree-sitter) for C, C++, C#, Python,
-  JavaScript, JSON, Bash, Rust and Lua
+  JavaScript, JSON, Bash, Rust and Lua, in the Catppuccin Mocha palette
 * Light/dark theme following Windows
 
 ## ![](art/png/pencil@3x.png) Neovim config
