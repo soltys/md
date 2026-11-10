@@ -444,8 +444,16 @@ static void layout_table(View *v, ViewItem *it, float width)
         natural[c] = SDL_max(natural[c], 3 * pad_x);
         total += natural[c];
     }
+    /* Too wide: columns narrower than an even share keep their natural
+     * width (short keys, numbers); the wide ones split what is left. */
+    float fair = width / (float)cols, keep = 0, wide = 0;
     for (int c = 0; c < cols; ++c) {
-        it->col_w[c] = total <= width ? natural[c] : SDL_floorf(natural[c] * width / total);
+        if (natural[c] <= fair) keep += natural[c];
+        else wide += natural[c];
+    }
+    for (int c = 0; c < cols; ++c) {
+        if (total <= width || natural[c] <= fair) it->col_w[c] = natural[c];
+        else it->col_w[c] = SDL_floorf(natural[c] * (width - keep) / wide);
         it->col_w[c] = SDL_max(it->col_w[c], 2 * pad_x + 8 * s);
     }
 

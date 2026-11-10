@@ -132,6 +132,7 @@ unsaved changes are never dropped silently.
 * Links (inline, reference, autolinks, e-mail); click to open, `.md` links
   open in md
 * Tables with column alignment and inline formatting in cells
+* YAML front matter shown as a key / value table (see docs/features.md)
 * Images (PNG, JPG, GIF, BMP, SVG, QOI, ...) loaded in the background,
   relative to the document; remote images show their alt text
 * Emoji including ZWJ sequences, skin tones, flags and keycaps

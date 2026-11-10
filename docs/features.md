@@ -1,3 +1,18 @@
+---
+title: md feature tour
+description: >
+  Everything md can render, in one file.
+author: Paweł Sołtysiak  # comments are ignored
+date: 2026-11-10
+draft: false
+tags: [markdown, viewer, neovim]
+aliases:
+  - features
+  - tour
+links:
+  repo: https://github.com/soltys/md
+---
+
 # md feature tour 🚀
 
 This file shows everything **md** can render. Open it with `md.exe docs\features.md`
@@ -31,6 +46,40 @@ follows as you type.
 
 Everything else typed in the editor goes to Neovim. Closing the window asks
 Neovim to quit, so unsaved changes are never lost silently.
+
+## Front matter
+
+The YAML block between the `---` lines at the very top of this file is
+front matter. md shows it as a table above the document (scroll up to see
+it). This is the source:
+
+```yaml
+---
+title: md feature tour
+description: >
+  Everything md can render, in one file.
+author: Paweł Sołtysiak  # comments are ignored
+date: 2026-11-10
+draft: false
+tags: [markdown, viewer, neovim]
+aliases:
+  - features
+  - tour
+links:
+  repo: https://github.com/soltys/md
+---
+```
+
+- Each top-level key becomes one row: the key on the left, the value on
+  the right.
+- Quotes around values are removed. `# comments` are skipped.
+- `|` and `>` block text is joined into one line.
+- Lists, whether `[a, b]` or one `- item` per line, are shown as code
+  pills.
+- Nested keys are shown as `key: value, ...`.
+- Front matter without any `key: value` line is shown as a YAML code block
+  instead.
+- TOML front matter (`+++`) is hidden.
 
 ## Headings
 
