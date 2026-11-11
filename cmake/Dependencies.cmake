@@ -1,6 +1,6 @@
 # Third-party code, all fetched at configure time and linked statically.
 include(FetchContent)
-set(FETCHCONTENT_QUIET OFF)
+set(FETCHCONTENT_QUIET ON)  # no download progress; output shown only on failure
 
 set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
 
@@ -28,7 +28,6 @@ FetchContent_Declare(SDL3
     GIT_REPOSITORY https://github.com/libsdl-org/SDL.git
     GIT_TAG        release-3.4.20
     GIT_SHALLOW    TRUE
-    GIT_PROGRESS   TRUE
     GIT_SUBMODULES ""
     SYSTEM)
 
@@ -46,7 +45,6 @@ FetchContent_Declare(SDL3_ttf
     GIT_REPOSITORY https://github.com/libsdl-org/SDL_ttf.git
     GIT_TAG        release-3.2.2
     GIT_SHALLOW    TRUE
-    GIT_PROGRESS   TRUE
     GIT_SUBMODULES external/freetype external/harfbuzz external/plutosvg external/plutovg
     SYSTEM)
 
@@ -68,7 +66,6 @@ FetchContent_Declare(SDL3_image
     GIT_REPOSITORY https://github.com/libsdl-org/SDL_image.git
     GIT_TAG        release-3.4.8
     GIT_SHALLOW    TRUE
-    GIT_PROGRESS   TRUE
     GIT_SUBMODULES ""   # vendored codecs not needed (built-in decoders only)
     SYSTEM)
 
@@ -82,7 +79,6 @@ FetchContent_Declare(tree_sitter
     GIT_TAG        v0.27.2
     GIT_SHALLOW    TRUE
     GIT_SUBMODULES ""
-    GIT_PROGRESS   TRUE
     SOURCE_SUBDIR  do-not-add)
 
 FetchContent_Declare(tree_sitter_markdown
@@ -90,7 +86,6 @@ FetchContent_Declare(tree_sitter_markdown
     GIT_TAG        v0.5.4
     GIT_SHALLOW    TRUE
     GIT_SUBMODULES ""
-    GIT_PROGRESS   TRUE
     SOURCE_SUBDIR  do-not-add)
 
 FetchContent_MakeAvailable(tree_sitter tree_sitter_markdown)
