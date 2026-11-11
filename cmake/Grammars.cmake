@@ -15,14 +15,26 @@ function(_md_embed_query out_var symbol file)
     set(${out_var} "const unsigned char ${symbol}[] = {${_arr}0x00};\nconst size_t ${symbol}_len = ${_bytes};\n" PARENT_SCOPE)
 endfunction()
 
-# md_add_grammar(<id> <repo> <tag> [SUBDIR <dir>])
-macro(md_add_grammar id repo tag)
-    FetchContent_Declare(ts_${id}
-        GIT_REPOSITORY ${repo}
-        GIT_TAG        ${tag}
-        GIT_SHALLOW    TRUE
-        GIT_SUBMODULES ""
-        SOURCE_SUBDIR  do-not-add)
+# md_add_grammar(<id> <release tarball url> <sha256>)
+# md_add_grammar(<id> <repo>.git <tag>)
+# Grammars are fetched as the source tarballs attached to their GitHub
+# releases (generated parser.c included), which is much faster than cloning.
+# A .git URL falls back to a shallow clone for releases without a usable
+# tarball.
+macro(md_add_grammar id url ref)
+    if("${url}" MATCHES "\\.git$")
+        FetchContent_Declare(ts_${id}
+            GIT_REPOSITORY ${url}
+            GIT_TAG        ${ref}
+            GIT_SHALLOW    TRUE
+            GIT_SUBMODULES ""
+            SOURCE_SUBDIR  do-not-add)
+    else()
+        FetchContent_Declare(ts_${id}
+            URL           ${url}
+            URL_HASH      SHA256=${ref}
+            SOURCE_SUBDIR do-not-add)
+    endif()
     FetchContent_MakeAvailable(ts_${id})
     set(_src "${ts_${id}_SOURCE_DIR}/src")
     set(_files "${_src}/parser.c")
@@ -43,16 +55,29 @@ macro(md_add_grammar id repo tag)
         "${ts_${id}_SOURCE_DIR}/queries/highlights.scm")
 endmacro()
 
-md_add_grammar(c          https://github.com/tree-sitter/tree-sitter-c.git          v0.24.2)
-md_add_grammar(cpp        https://github.com/tree-sitter/tree-sitter-cpp.git        v0.23.4)
-md_add_grammar(python     https://github.com/tree-sitter/tree-sitter-python.git     v0.25.0)
-md_add_grammar(javascript https://github.com/tree-sitter/tree-sitter-javascript.git v0.25.0)
-md_add_grammar(json       https://github.com/tree-sitter/tree-sitter-json.git       v0.24.8)
-md_add_grammar(bash       https://github.com/tree-sitter/tree-sitter-bash.git       v0.25.1)
-md_add_grammar(rust       https://github.com/tree-sitter/tree-sitter-rust.git       v0.24.2)
-md_add_grammar(c_sharp    https://github.com/tree-sitter/tree-sitter-c-sharp.git    v0.23.5)
-md_add_grammar(lua        https://github.com/tree-sitter-grammars/tree-sitter-lua.git v0.5.0)
-md_add_grammar(yaml       https://github.com/tree-sitter-grammars/tree-sitter-yaml.git v0.7.2)
+set(_gh https://github.com)
+md_add_grammar(c          ${_gh}/tree-sitter/tree-sitter-c/releases/download/v0.24.2/tree-sitter-c.tar.gz
+    f3a2cdfbca39c79f60baf2ef62b42084c609782c76485de457ba36ff65d51baf)
+# The tree-sitter-cpp v0.23.4 release tarball lists src/ twice ("./src/..."
+# and "src/...") and CMake refuses to extract it, so this one is cloned.
+md_add_grammar(cpp        ${_gh}/tree-sitter/tree-sitter-cpp.git
+    v0.23.4)
+md_add_grammar(python     ${_gh}/tree-sitter/tree-sitter-python/releases/download/v0.25.0/tree-sitter-python.tar.gz
+    7bce887eb2f33e94bf74a69645cf5138d4096720e54fd3269a6124c06b93c584)
+md_add_grammar(javascript ${_gh}/tree-sitter/tree-sitter-javascript/releases/download/v0.25.0/tree-sitter-javascript.tar.gz
+    3385229430f686c6ff6e756168d7e05a01da4c45acb7708239edc9fa9ee41514)
+md_add_grammar(json       ${_gh}/tree-sitter/tree-sitter-json/releases/download/v0.24.8/tree-sitter-json.tar.xz
+    3f53c9d908328ac6004dd51b1e1b617315886e1bd7e772430c5090252ec72fab)
+md_add_grammar(bash       ${_gh}/tree-sitter/tree-sitter-bash/releases/download/v0.25.1/tree-sitter-bash.tar.gz
+    bd0d72814c6512de190439ce6562635c69ce27fa8bc59eaf381d44263579df36)
+md_add_grammar(rust       ${_gh}/tree-sitter/tree-sitter-rust/releases/download/v0.24.2/tree-sitter-rust.tar.gz
+    953d7a7122cc004d3ad516ae193dde408e633c2da59356ba67e713f3e52d73fc)
+md_add_grammar(c_sharp    ${_gh}/tree-sitter/tree-sitter-c-sharp/releases/download/v0.23.5/tree-sitter-c-sharp.tar.gz
+    d7e9db699ad8ebd234cb6922d285efe128a408db3737d4fa0bab6c668e0fc5e6)
+md_add_grammar(lua        ${_gh}/tree-sitter-grammars/tree-sitter-lua/releases/download/v0.5.0/tree-sitter-lua.tar.gz
+    dd6d995634ea7dc2eac687f4890f995f03c421e0c42c34b3cfcfc81c47e48d7e)
+md_add_grammar(yaml       ${_gh}/tree-sitter-grammars/tree-sitter-yaml/releases/download/v0.7.2/tree-sitter-yaml.tar.gz
+    2707d9ff0556ee6c36a77299b4c08e5b2dcbd0d35f0b9688bb2ac8e276025f72)
 
 file(WRITE "${_queries_c}.tmp" "${_queries_body}")
 file(COPY_FILE "${_queries_c}.tmp" "${_queries_c}" ONLY_IF_DIFFERENT)

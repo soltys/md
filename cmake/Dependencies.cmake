@@ -25,16 +25,15 @@ set(SDL_VULKAN        OFF CACHE BOOL "" FORCE)
 set(SDL_RENDER_VULKAN OFF CACHE BOOL "" FORCE)
 
 FetchContent_Declare(SDL3
-    GIT_REPOSITORY https://github.com/libsdl-org/SDL.git
-    GIT_TAG        release-3.4.20
-    GIT_SHALLOW    TRUE
-    GIT_SUBMODULES ""
+    URL      https://github.com/libsdl-org/SDL/releases/download/release-3.4.20/SDL3-3.4.20.tar.gz
+    URL_HASH SHA256=f3bb06f55bed9557227a700af2ea62e49497ebdf58037732a731a5fb3ef8581f
     SYSTEM)
 
 # ------------------------------------------------------------ SDL3_ttf ----
 # Vendored FreeType + HarfBuzz (shaping, emoji sequences) + plutosvg (the
 # OT-SVG colour glyphs in Noto Color Emoji). Upstream keeps those as git
-# submodules of SDL_ttf; FetchContent pulls them in with the checkout.
+# submodules of SDL_ttf and the release tarball does not include them, so
+# this one dependency stays a (shallow) git clone.
 set(SDLTTF_VENDORED  ON  CACHE BOOL "" FORCE)
 set(SDLTTF_HARFBUZZ  ON  CACHE BOOL "" FORCE)
 set(SDLTTF_PLUTOSVG  ON  CACHE BOOL "" FORCE)
@@ -63,10 +62,8 @@ set(SDLIMAGE_TESTS        OFF CACHE BOOL "" FORCE)
 set(SDLIMAGE_INSTALL      OFF CACHE BOOL "" FORCE)
 
 FetchContent_Declare(SDL3_image
-    GIT_REPOSITORY https://github.com/libsdl-org/SDL_image.git
-    GIT_TAG        release-3.4.8
-    GIT_SHALLOW    TRUE
-    GIT_SUBMODULES ""   # vendored codecs not needed (built-in decoders only)
+    URL      https://github.com/libsdl-org/SDL_image/releases/download/release-3.4.8/SDL3_image-3.4.8.tar.gz
+    URL_HASH SHA256=e8223b424bc7541cf84ffff5cf7e4f24ec3711c60462cb1bd6dc1d7bd7f25477
     SYSTEM)
 
 FetchContent_MakeAvailable(SDL3 SDL3_ttf SDL3_image)
@@ -74,26 +71,25 @@ FetchContent_MakeAvailable(SDL3 SDL3_ttf SDL3_image)
 # --------------------------------------------------------- tree-sitter ----
 # SOURCE_SUBDIR points at a directory without a CMakeLists.txt, so these are
 # only downloaded; we compile the few C files we need ourselves.
+# tree-sitter publishes no C source tarball on GitHub; the crates.io package
+# of the same release is exactly its lib/ directory (include/ + src/).
 FetchContent_Declare(tree_sitter
-    GIT_REPOSITORY https://github.com/tree-sitter/tree-sitter.git
-    GIT_TAG        v0.27.2
-    GIT_SHALLOW    TRUE
-    GIT_SUBMODULES ""
-    SOURCE_SUBDIR  do-not-add)
+    URL      https://static.crates.io/crates/tree-sitter/tree-sitter-0.27.2.crate
+    URL_HASH SHA256=37b2bed8f39a73439f3b0b7ed8f452be5d2911b5e9da69d352ef113bb7448fb8
+    DOWNLOAD_NAME tree-sitter-0.27.2.tar.gz
+    SOURCE_SUBDIR do-not-add)
 
 FetchContent_Declare(tree_sitter_markdown
-    GIT_REPOSITORY https://github.com/tree-sitter-grammars/tree-sitter-markdown.git
-    GIT_TAG        v0.5.4
-    GIT_SHALLOW    TRUE
-    GIT_SUBMODULES ""
-    SOURCE_SUBDIR  do-not-add)
+    URL      https://github.com/tree-sitter-grammars/tree-sitter-markdown/releases/download/v0.5.4/tree-sitter-markdown.tar.gz
+    URL_HASH SHA256=3c71744d49d9fb850057d59d1eb27269873eb16beb9f71bd6f3d7f6fa901660c
+    SOURCE_SUBDIR do-not-add)
 
 FetchContent_MakeAvailable(tree_sitter tree_sitter_markdown)
 
-add_library(md_tree_sitter STATIC "${tree_sitter_SOURCE_DIR}/lib/src/lib.c")
+add_library(md_tree_sitter STATIC "${tree_sitter_SOURCE_DIR}/src/lib.c")
 target_include_directories(md_tree_sitter
-    PUBLIC  "${tree_sitter_SOURCE_DIR}/lib/include"
-    PRIVATE "${tree_sitter_SOURCE_DIR}/lib/src")
+    PUBLIC  "${tree_sitter_SOURCE_DIR}/include"
+    PRIVATE "${tree_sitter_SOURCE_DIR}/src")
 
 set(_tsmd "${tree_sitter_markdown_SOURCE_DIR}")
 add_library(md_ts_markdown STATIC
