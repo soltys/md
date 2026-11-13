@@ -169,7 +169,8 @@ nvim -u nvim\init.lua README.md
 ## ![](art/png/palette@3x.png) Pixel art assets (PICO-8 palette)
 
 md's pixel art is drawn as text in `art/*.txt` and turned into PNGs by
-`pixelart.exe` (`tools/pixelart`), a small console tool. Every pixel is one
+[pixelart](https://github.com/soltys/pixelart), a small Windows console tool
+that lives in its own repository. Every pixel is one
 character: `0`-`9`, `a`-`f` pick one of the 16
 [PICO-8 colours](https://pico-8.fandom.com/wiki/Palette), `.` is transparent.
 
@@ -204,10 +205,13 @@ regenerate them with
 cmake --build --preset release --target art
 ```
 
-or run the tool directly: `pixelart.exe -o art\png art\sprites.txt`.
-Mistakes (unknown colour characters, ragged rows, bad scales) are reported as
-`file:line: error: ...` and the tool exits with status 1.
-`-DMD_BUILD_TOOLS=OFF` leaves the tool out of the build.
+which fetches pixelart (pinned to a commit in `CMakeLists.txt`), builds it
+and runs it on every sheet. The built tool can also be run directly:
+`pixelart.exe -o art\png art\sprites.txt`. Mistakes (unknown colour
+characters, ragged rows, bad scales) are reported as `file:line: error: ...`
+and the tool exits with status 1. `-DMD_BUILD_TOOLS=OFF` skips fetching the
+tool. pixelart can also use palettes other than PICO-8 (`-p palette.txt`);
+see its README.
 
 ## ![](art/png/bolt@3x.png) How startup is kept fast
 
@@ -237,7 +241,7 @@ Mistakes (unknown colour characters, ragged rows, bad scales) are reported as
 | `src/editor.c` | Draws Neovim's grid |
 | `src/fonts.c`, `src/assets.c` | Embedded fonts (RCDATA) and font cache |
 | `src/emoji.c`, `src/images.c` | Emoji clustering, async image loading |
-| `tools/pixelart/pixelart.c`, `art/` | PICO-8 sprite sheets to PNG assets |
+| `art/` | PICO-8 sprite sheets and the PNGs generated from them by [pixelart](https://github.com/soltys/pixelart) |
 
 ## ![](art/png/ok@3x.png) Status
 
