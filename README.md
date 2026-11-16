@@ -61,12 +61,17 @@ e.g. `build/vs2026/artifacts/Release`.
 
 ### Installing
 
-md.exe is self-contained, so installing copies that one file. The default
-location is the current user's `Documents\PathApps`, as both `md.exe` and
-`mdv.exe` (the same program under a second name; put
-`Documents\PathApps` on `PATH` once and every app installed there runs from
-anywhere). Documents is looked up from Windows, so a OneDrive-redirected
-Documents folder works.
+md.exe is self-contained, so installing copies that one file, as both
+`md.exe` and `mdv.exe` (the same program under a second name). The default
+location is a folder meant to be on `PATH`, the first of:
+
+1. the `PATH_APPS` environment variable, if set;
+2. `%USERPROFILE%\Documents\PathApps`, if that folder exists;
+3. `%USERPROFILE%\PathApps`.
+
+Put that folder on `PATH` once and every app installed there runs from
+anywhere. The default is picked when configuring, so re-run
+`cmake --preset vs2026` after changing `PATH_APPS`.
 
 ```bat
 cmake --preset vs2026

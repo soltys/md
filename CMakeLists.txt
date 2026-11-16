@@ -137,33 +137,43 @@ else()
 endif()
 
 # Install: md.exe is self-contained (fonts and the Neovim config are
-# embedded), so installing is copying one file. On Windows the default is
-# the current user's Documents\PathApps (a folder meant to be on PATH;
-# Documents is asked from Windows, so a OneDrive-redirected one works too).
+# embedded), so installing is copying one file. On Windows the default
+# location (a folder meant to be on PATH) is the first of:
+#   1. the PATH_APPS environment variable,
+#   2. %USERPROFILE%\Documents\PathApps, if that folder exists,
+#   3. %USERPROFILE%\PathApps.
+# An explicit -DCMAKE_INSTALL_PREFIX or --prefix always wins.
 #   cmake --build --preset install
 #   cmake --install build/vs2026 --config Release [--prefix <dir>]
 if(WIN32)
+    set(_md_prefix "")
+    if(DEFINED ENV{PATH_APPS} AND NOT "$ENV{PATH_APPS}" STREQUAL "")
+        file(TO_CMAKE_PATH "$ENV{PATH_APPS}" _md_prefix)
+    elseif(DEFINED ENV{USERPROFILE})
+        file(TO_CMAKE_PATH "$ENV{USERPROFILE}" _md_home)
+        if(IS_DIRECTORY "${_md_home}/Documents/PathApps")
+            set(_md_prefix "${_md_home}/Documents/PathApps")
+        else()
+            set(_md_prefix "${_md_home}/PathApps")
+        endif()
+    endif()
+
     set(_md_old_default "")
     if(DEFINED ENV{LOCALAPPDATA})
         file(TO_CMAKE_PATH "$ENV{LOCALAPPDATA}/Programs/md" _md_old_default)
     endif()
-    # Replace CMake's stock default (C:/Program Files/md, which needs admin)
-    # also in build trees configured before this rule existed, where
-    # CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT is no longer set.
-    if(CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT OR
+    # Use the default unless the prefix was chosen by hand: replace CMake's
+    # stock default (C:/Program Files/md, which needs admin), a value this
+    # rule picked on an earlier configure (so changing PATH_APPS takes effect
+    # in an existing build tree), and the defaults of older md versions.
+    if(_md_prefix AND (
+       CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT OR
+       CMAKE_INSTALL_PREFIX STREQUAL "${MD_AUTO_INSTALL_PREFIX}" OR
        CMAKE_INSTALL_PREFIX STREQUAL _md_old_default OR
-       CMAKE_INSTALL_PREFIX MATCHES "/Program Files( \\(x86\\))?/md$")
-        execute_process(
-            COMMAND powershell -NoProfile -NonInteractive -Command
-                    "[Environment]::GetFolderPath('MyDocuments')"
-            OUTPUT_VARIABLE _md_docs OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET)
-        if(NOT _md_docs AND DEFINED ENV{USERPROFILE})
-            set(_md_docs "$ENV{USERPROFILE}/Documents")
-        endif()
-        if(_md_docs)
-            file(TO_CMAKE_PATH "${_md_docs}/PathApps" _md_prefix)
-            set(CMAKE_INSTALL_PREFIX "${_md_prefix}" CACHE PATH "Install location" FORCE)
-        endif()
+       CMAKE_INSTALL_PREFIX MATCHES "/Documents/PathApps$" OR
+       CMAKE_INSTALL_PREFIX MATCHES "/Program Files( \\(x86\\))?/md$"))
+        set(CMAKE_INSTALL_PREFIX "${_md_prefix}" CACHE PATH "Install location" FORCE)
+        set(MD_AUTO_INSTALL_PREFIX "${_md_prefix}" CACHE INTERNAL "")
     endif()
     message(STATUS "md.exe and mdv.exe install to ${CMAKE_INSTALL_PREFIX}")
     install(TARGETS md RUNTIME DESTINATION .)
