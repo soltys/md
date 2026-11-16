@@ -11,6 +11,7 @@
 #define CELL_PAD_X    12.0f
 #define CELL_PAD_Y    7.0f
 #define LINE_FACTOR   1.45f
+#define CODE_SPAN_PAD 3.0f   /* inline code background beyond the glyphs */
 
 static const float heading_scale[7] = {1.0f, 2.0f, 1.5f, 1.25f, 1.0f, 0.875f, 0.85f};
 
@@ -44,7 +45,9 @@ typedef struct Tok {
     uint8_t kind;             /* TOK_* */
     uint32_t url, url_len;
     Image *img;
-    float w, h, ascent, lineskip;
+    float w, h, ascent, lineskip; /* w includes pad_l / pad_r */
+    float pad_l, pad_r;       /* inline code: room for its background */
+    bool joined;              /* second half of a word broken to fit the line */
 } Tok;
 
 enum { TOK_WORD, TOK_SPACE, TOK_NEWLINE, TOK_IMAGE };
@@ -169,6 +172,7 @@ static void tokenize(View *v, const char *text, uint32_t a, uint32_t b, const Sp
         base.img = img;
     }
 
+    const int first_tok = tok_count;
     uint32_t i = a;
     while (i < b) {
         Tok t = base;
@@ -228,6 +232,67 @@ static void tokenize(View *v, const char *text, uint32_t a, uint32_t b, const Sp
         push_tok(&t);
         i = j;
     }
+    /* Inline code: its background reaches CODE_SPAN_PAD past the text on
+     * both sides; keep that room in the layout so the box never touches or
+     * covers the neighbouring text (a comma, the space after it). */
+    if ((style & ST_CODE) && !ts->pre && tok_count > first_tok) {
+        const float pad = SDL_roundf(CODE_SPAN_PAD * v->scale);
+        toks[first_tok].pad_l = pad;
+        toks[first_tok].w += pad;
+        toks[tok_count - 1].pad_r = pad;
+        toks[tok_count - 1].w += pad;
+    }
+}
+
+/* Splits toks[k], a word wider than `room`, after the longest prefix that
+ * fits (at least one character), so overlong words (paths, identifiers in
+ * narrow table columns) wrap instead of running out of their box. Returns
+ * false if the word cannot be split. */
+static bool split_tok(int k, const char *text, float room)
+{
+    Tok *t = &toks[k];
+    if (t->kind != TOK_WORD || t->len < 2) return false;
+    const char *str = text + t->start;
+    size_t bytes = 0;
+    int mw = 0;
+    float avail = room - t->pad_l;
+    TTF_MeasureString(t->font, str, t->len, avail > 0 ? (int)avail : 0, &mw, &bytes);
+    if (bytes == 0) { /* not even one character fits: take one anyway */
+        bytes = 1;
+        while (bytes < t->len && ((unsigned char)str[bytes] & 0xC0) == 0x80) bytes++;
+    }
+    while (bytes > 0 && bytes < t->len && ((unsigned char)str[bytes] & 0xC0) == 0x80) bytes--;
+    if (bytes == 0 || bytes >= t->len) return false;
+
+    Tok rest = *t;
+    push_tok(&rest); /* grow by one (may move toks) */
+    t = &toks[k];
+    SDL_memmove(&toks[k + 2], &toks[k + 1], sizeof(Tok) * (size_t)(tok_count - k - 2));
+    Tok *head = &toks[k], *tail = &toks[k + 1];
+    *tail = *head;
+    head->len = (uint32_t)bytes;
+    head->pad_r = 0;
+    head->w = (float)text_width(head->font, str, head->len) + head->pad_l;
+    tail->start += (uint32_t)bytes;
+    tail->len -= (uint32_t)bytes;
+    tail->pad_l = 0;
+    tail->joined = true;
+    tail->w = (float)text_width(tail->font, text + tail->start, tail->len) + tail->pad_r;
+    return true;
+}
+
+/* The widest run that layout_text() cannot break (tokens between spaces),
+ * i.e. the narrowest the text can be laid out without breaking words. Uses
+ * the tokens of the last layout_text() call. */
+static float min_text_width(void)
+{
+    float best = 0, run = 0;
+    for (int i = 0; i < tok_count; ++i) {
+        if (toks[i].kind == TOK_SPACE || toks[i].kind == TOK_NEWLINE) run = 0;
+        else run += toks[i].w;
+        best = SDL_max(best, run);
+    }
+    return best;
 }
 
 static SDL_Color tok_color(View *v, const Tok *t, const TextStyle *ts)
@@ -293,6 +358,9 @@ static float layout_text(View *v, Para *out, uint32_t text_off, uint32_t len,
             Tok *t = &toks[end];
             if (t->kind == TOK_NEWLINE) break;
             if (t->kind == TOK_SPACE) last_break = end;
+            /* A word wider than the whole line: break it (otherwise it would
+             * stick out of its column or the page). */
+            if (out && !ts->pre && end == line_start && t->w > width) split_tok(end, text, width);
             if (!ts->pre && x + t->w > width && end > line_start && t->kind != TOK_SPACE) {
                 /* wrap: at the last space if there is one on this line */
                 if (last_break > line_start) end = last_break;
@@ -331,18 +399,23 @@ static float layout_text(View *v, Para *out, uint32_t text_off, uint32_t len,
                 float ty = y + base - (t->kind == TOK_IMAGE ? t->h : t->ascent);
                 SDL_Color c = tok_color(v, t, ts);
                 bool mergeable = cur && t->kind != TOK_IMAGE && !cur->img &&
+                                 t->pad_l == 0 && cur->pad_r == 0 && !t->joined &&
                                  cur->font == t->font && cur->style == t->style &&
                                  cur->url == t->url && cur->str + cur->len == text_off + t->start &&
                                  SDL_memcmp(&cur->color, &c, sizeof(c)) == 0;
                 if (mergeable) {
                     cur->len += t->len;
                     cur->w = x + t->w - cur->x;
+                    cur->pad_r = t->pad_r;
                 } else if (!(t->kind == TOK_SPACE && !(t->style & (ST_CODE | ST_LINK | ST_STRIKE)))) {
                     Frag f;
                     SDL_zero(f);
                     f.x = x;
                     f.y = ty;
                     f.w = t->w;
+                    f.pad_l = t->pad_l;
+                    f.pad_r = t->pad_r;
+                    f.joined = t->joined;
                     f.h = t->kind == TOK_IMAGE ? t->h : t->lineskip;
                     f.str = text_off + t->start;
                     f.len = t->len;
@@ -426,6 +499,7 @@ static void layout_table(View *v, ViewItem *it, float width)
     it->col_w = SDL_calloc((size_t)cols, sizeof(float));
     it->row_h = SDL_calloc((size_t)rows, sizeof(float));
     float *natural = SDL_calloc((size_t)cols, sizeof(float));
+    float *minimum = SDL_calloc((size_t)cols, sizeof(float));
 
     TextStyle ts = body_style(v, b);
     TextStyle hs = ts;
@@ -437,24 +511,27 @@ static void layout_table(View *v, ViewItem *it, float width)
         const TableCell *c = &doc->cells[b->cell_first + i];
         float w = layout_text(v, NULL, c->text, c->text_len, doc->spans + c->span_first,
                               c->span_count, 1e9f, c->row == 0 ? &hs : &ts);
-        natural[c->col] = SDL_max(natural[c->col], w + 2 * pad_x);
+        natural[c->col] = SDL_max(natural[c->col], SDL_ceilf(w) + 2 * pad_x);
+        minimum[c->col] = SDL_max(minimum[c->col], SDL_ceilf(min_text_width()) + 2 * pad_x);
     }
-    float total = 0;
+    /* Like an HTML table: natural widths if they fit; otherwise every column
+     * keeps its longest unbreakable word and the rest of the room goes to
+     * the columns in proportion to what they still want. Only when even the
+     * longest words do not fit do columns shrink below them (and the words
+     * are broken). */
+    float total = 0, total_min = 0;
     for (int c = 0; c < cols; ++c) {
         natural[c] = SDL_max(natural[c], 3 * pad_x);
+        minimum[c] = SDL_min(SDL_max(minimum[c], 3 * pad_x), natural[c]);
         total += natural[c];
-    }
-    /* Too wide: columns narrower than an even share keep their natural
-     * width (short keys, numbers); the wide ones split what is left. */
-    float fair = width / (float)cols, keep = 0, wide = 0;
-    for (int c = 0; c < cols; ++c) {
-        if (natural[c] <= fair) keep += natural[c];
-        else wide += natural[c];
+        total_min += minimum[c];
     }
     for (int c = 0; c < cols; ++c) {
-        if (total <= width || natural[c] <= fair) it->col_w[c] = natural[c];
-        else it->col_w[c] = SDL_floorf(natural[c] * (width - keep) / wide);
-        it->col_w[c] = SDL_max(it->col_w[c], 2 * pad_x + 8 * s);
+        float cw;
+        if (total <= width) cw = natural[c];
+        else if (total_min >= width) cw = minimum[c] * width / total_min;
+        else cw = minimum[c] + (natural[c] - minimum[c]) * (width - total_min) / (total - total_min);
+        it->col_w[c] = SDL_max(SDL_floorf(cw), 2 * pad_x + 8 * s);
     }
 
     for (uint32_t i = 0; i < b->cell_count; ++i) {
@@ -488,6 +565,7 @@ static void layout_table(View *v, ViewItem *it, float width)
     it->h = y;
     SDL_free(row_y);
     SDL_free(natural);
+    SDL_free(minimum);
 }
 
 static float content_x0(const View *v, float *content_w)
@@ -843,15 +921,25 @@ static void draw_para(View *v, SDL_Renderer *r, const Para *p, float ox, float o
             continue;
         }
         if (f->style & ST_CODE) {
-            SDL_FRect bg = {x - 3 * s, y, f->w + 6 * s, f->h};
-            set_color(r, v->theme.code_bg);
+            /* Only the ends of a span carry padding; a piece continued from
+             * or onto another line still gets the same margin around its
+             * text, so wrapped spans look like the unwrapped ones. */
+            const float pad = SDL_roundf(CODE_SPAN_PAD * s);
+            SDL_FRect bg = {SDL_roundf(x + f->pad_l - pad), SDL_roundf(y),
+                            SDL_roundf(f->w - f->pad_l - f->pad_r + 2 * pad), SDL_roundf(f->h)};
+            set_color(r, v->theme.code_span_bg);
             SDL_RenderFillRect(r, &bg);
         }
         if (!f->text) {
             f->text = TTF_CreateText(v->engine, f->font, v->doc->strings + f->str, f->len);
             if (f->text) TTF_SetTextColor(f->text, f->color.r, f->color.g, f->color.b, f->color.a);
         }
-        if (f->text) TTF_DrawRendererText(f->text, x, y);
+        /* Whole pixels only: the glyph atlas is sampled with nearest
+         * filtering and packed without gaps, so at fractional positions
+         * (display scales like 125% / 150%, table cells) the GPU can pick
+         * texels of the neighbouring glyph (stray marks above letters) or
+         * drop a row (the dot of an i). */
+        if (f->text) TTF_DrawRendererText(f->text, SDL_roundf(x + f->pad_l), SDL_roundf(y));
         if (f->style & ST_STRIKE) {
             float asc = (float)TTF_GetFontAscent(f->font);
             SDL_FRect line = {x, y + asc * 0.68f, f->w, SDL_max(1.0f, SDL_floorf(s))};
@@ -1160,7 +1248,8 @@ static bool hit(View *v, float x, float y, SelPos *out)
     else {
         size_t bytes = 0;
         int mw = 0;
-        TTF_MeasureString(f->font, v->doc->strings + f->str, f->len, (int)(dx - f->ax), &mw, &bytes);
+        float tx = dx - f->ax - f->pad_l;
+        TTF_MeasureString(f->font, v->doc->strings + f->str, f->len, tx > 0 ? (int)tx : 0, &mw, &bytes);
         out->off = (uint32_t)bytes;
     }
     if (dy > f->ay + f->h && best_d >= 1000.0f) out->off = f->len; /* below the line: to its end */
@@ -1213,7 +1302,7 @@ static float measure_prefix(const Frag *f, const char *str, uint32_t off)
     if (off >= f->len || f->img) return f->w;
     int w = 0, h = 0;
     TTF_GetStringSize(f->font, str, off, &w, &h);
-    return (float)w;
+    return f->pad_l + (float)w;
 }
 
 void view_draw_selection(View *v, SDL_Renderer *r)
@@ -1252,6 +1341,7 @@ static char frag_sep(const View *v, int i)
     const Frag *p = &v->frags[i - 1], *f = &v->frags[i];
     BlockKind kind = v->items[f->item].block->kind;
     if (p->item != f->item) return '\n';
+    if (f->joined) return 0; /* a word broken across lines */
     if (SDL_fabsf(p->ay - f->ay) >= 1.0f) {
         return kind == BLOCK_CODE || kind == BLOCK_HTML || kind == BLOCK_TABLE ? '\n' : ' ';
     }

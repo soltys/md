@@ -10,7 +10,8 @@ typedef struct Theme {
     SDL_Color muted;
     SDL_Color heading;
     SDL_Color rule;
-    SDL_Color code_bg;        /* inline code, table stripes, search bar */
+    SDL_Color code_bg;        /* table stripes, search bar */
+    SDL_Color code_span_bg;   /* inline code; translucent so it shows on stripes too */
     SDL_Color code_text;
     SDL_Color block_bg;       /* fenced / indented code blocks */
     SDL_Color block_text;
@@ -95,6 +96,7 @@ static const Theme THEME_LIGHT = {
     .heading   = {0x1F, 0x23, 0x28, 0xFF},
     .rule      = {0xD1, 0xD9, 0xE0, 0xFF},
     .code_bg   = {0xF6, 0xF8, 0xFA, 0xFF},
+    .code_span_bg = {0x81, 0x8B, 0x98, 0x1F},
     .code_text = {0x1F, 0x23, 0x28, 0xFF},
     .quote_bar = {0xD0, 0xD7, 0xDE, 0xFF},
     .accent    = {0x09, 0x69, 0xDA, 0xFF},
@@ -108,6 +110,7 @@ static const Theme THEME_DARK = {
     .heading   = {0xF0, 0xF6, 0xFC, 0xFF},
     .rule      = {0x30, 0x36, 0x3D, 0xFF},
     .code_bg   = {0x16, 0x1B, 0x22, 0xFF},
+    .code_span_bg = {0x65, 0x6C, 0x76, 0x33},
     .code_text = {0xE6, 0xED, 0xF3, 0xFF},
     .quote_bar = {0x3D, 0x44, 0x4D, 0xFF},
     .accent    = {0x47, 0x8B, 0xE6, 0xFF},

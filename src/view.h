@@ -11,7 +11,8 @@
  * relative to the owning paragraph's origin. TTF_Text objects are created
  * lazily the first time a fragment is drawn. */
 typedef struct Frag {
-    float x, y, w, h;
+    float x, y, w, h;         /* w includes pad_l / pad_r */
+    float pad_l, pad_r;       /* room kept for an inline code background */
     float ax, ay;             /* absolute document position (selection) */
     int item;                 /* owning item index */
     uint32_t str, len;        /* absolute offset into Document.strings */
@@ -19,6 +20,8 @@ typedef struct Frag {
     TTF_Text *text;
     SDL_Color color;
     uint16_t style;
+    bool joined;              /* continues the word of the previous fragment (broken
+                                 because it was wider than the line) */
     uint32_t url, url_len;
     Image *img;
 } Frag;
