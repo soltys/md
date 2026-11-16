@@ -55,6 +55,10 @@ build\ninja-release\md.exe README.md
 | `ninja-release` | Ninja, MSVC `cl` | `build/ninja-release/md.exe` |
 | `ninja-debug` | Ninja, MSVC `cl` | `build/ninja-debug/md.exe` |
 
+The output folder holds md.exe only. Everything else the build produces
+(dependency libraries, PDBs, pixelart.exe) goes to `artifacts/` next to it,
+e.g. `build/vs2026/artifacts/Release`.
+
 ### Installing
 
 md.exe is self-contained, so installing copies that one file. The default
