@@ -46,6 +46,7 @@ typedef struct ViewItem {
     float *row_h;
     float x, y, w, h;         /* text box, document coordinates (pixels) */
     float box_y, box_h;       /* background box (code, tables) */
+    float hscroll;            /* code blocks: horizontal scroll of long lines */
 } ViewItem;
 
 /* A position in the laid-out text: fragment index + byte offset in it.
@@ -99,6 +100,10 @@ bool view_layout_more(View *v, Uint64 budget_ms);
 bool view_layout_pending(const View *v);
 
 void view_scroll_by(View *v, float dy);
+/* Scrolls the code block under viewport position (x, y) sideways by dx
+ * pixels. Returns false if there is no code block there or its lines all
+ * fit (the caller can then use the event for something else). */
+bool view_hscroll_at(View *v, float x, float y, float dx);
 void view_scroll_to(View *v, float y);
 void view_scroll_to_end(View *v);
 /* Scrolls so the block containing source line `line` (1-based) is on top. */

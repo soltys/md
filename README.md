@@ -127,6 +127,7 @@ open it in md to try it out.
 | Ctrl+C / Ctrl+Shift+C | Copy the selection as rich text (pastes with headings, lists, links, code colours into Word, Outlook, browsers) / as plain text |
 | Click a link | Open it (drag over a link to select its text instead) |
 | PgUp / PgDn / Space / Home / End, wheel | Scroll the preview (the editor follows) |
+| Shift+wheel, horizontal wheel / touchpad | Scroll a code block with long lines sideways (mouse over it) |
 | j / k, Ctrl+d / Ctrl+u, Ctrl+f / Ctrl+b, gg / G | Vim-style scrolling in the preview; counts work (5j, 42G = source line 42) |
 | / or ?, then n / N | Search the preview forward / backward, then jump between matches (case-insensitive unless the text has a capital) |
 

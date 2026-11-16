@@ -413,6 +413,7 @@ static const char *const HELP[][2] = {
     {NULL, NULL},
     {NULL, "Preview"},
     {"Wheel, PgUp / PgDn", "Scroll (the editor follows)"},
+    {"Shift+wheel", "Scroll a wide code block sideways"},
     {"Space, Home / End", "A page down, to the start / end"},
     {"j / k", "A line down / up (5j: five lines)"},
     {"Ctrl+d / Ctrl+u", "Half a page down / up"},
@@ -1311,9 +1312,20 @@ static bool handle_event(const SDL_Event *e)
             int steps = (int)SDL_ceilf(SDL_fabsf(e->wheel.y));
             for (int i = 0; i < steps && i < 10; ++i) editor_mouse("wheel", dir, x, y);
         } else {
-            view_scroll_by(&app.view, -e->wheel.y * 3 * view_line_height(&app.view));
-            app.viewer_scrolled = true;
-            app.dirty = true;
+            /* Sideways: a horizontal wheel / touchpad swipe, or Shift+wheel,
+             * scrolls the code block under the mouse. */
+            const float step = 3 * view_line_height(&app.view);
+            float hx = e->wheel.x;
+            if (SDL_GetModState() & SDL_KMOD_SHIFT) hx = -e->wheel.y;
+            float vx = x - app.viewer_rect.x, vy = y - app.viewer_rect.y;
+            bool sideways = hx != 0 && (SDL_GetModState() & SDL_KMOD_SHIFT || SDL_fabsf(e->wheel.x) >= SDL_fabsf(e->wheel.y));
+            if (sideways) {
+                if (view_hscroll_at(&app.view, vx, vy, hx * step)) app.dirty = true;
+            } else {
+                view_scroll_by(&app.view, -e->wheel.y * 3 * view_line_height(&app.view));
+                app.viewer_scrolled = true;
+                app.dirty = true;
+            }
         }
         break;
     }

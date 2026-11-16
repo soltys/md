@@ -643,6 +643,7 @@ static void layout_item(View *v, int idx)
         it->y = y + CODE_PAD * s + label_h;
         it->h = it->para.h;
         it->box_h = it->h + 2 * CODE_PAD * s + label_h;
+        it->hscroll = SDL_clamp(it->hscroll, 0.0f, SDL_max(0.0f, it->para.w - it->w));
         y += it->box_h + 16 * s;
         break;
     }
@@ -672,7 +673,7 @@ static void layout_item(View *v, int idx)
     }
     (void)doc;
     /* Absolute positions for hit testing / selection. */
-    anchor_para(v, &it->para, it->x, it->y);
+    anchor_para(v, &it->para, it->x - it->hscroll, it->y);
     anchor_para(v, &it->marker, it->x - it->marker.w - 8 * s, it->y);
     if (b->kind == BLOCK_TABLE) {
         for (uint32_t c = 0; c < b->cell_count; ++c) {
@@ -771,17 +772,27 @@ void view_destroy(View *v)
 void view_set_document(View *v, Document *doc, bool keep_scroll)
 {
     float old_scroll = v->scroll;
+    /* Live preview: keep code blocks scrolled sideways where they were
+     * (matched by block index; clamped again by the layout). */
+    int old_count = keep_scroll ? v->item_count : 0;
+    float *old_h = old_count ? SDL_malloc(sizeof(float) * (size_t)old_count) : NULL;
+    if (!old_h) old_count = 0;
+    for (int i = 0; i < old_count; ++i) old_h[i] = v->items[i].hscroll;
     free_items(v);
     document_free(v->doc);
     v->doc = doc;
     v->scroll = 0;
     v->next_y = MARGIN * v->scale;
     v->content_height = v->next_y;
-    if (!doc || doc->error) return;
+    if (!doc || doc->error) { SDL_free(old_h); return; }
 
     v->items = SDL_calloc((size_t)(doc->block_count ? doc->block_count : 1), sizeof(ViewItem));
     v->item_count = doc->block_count;
-    for (int i = 0; i < doc->block_count; ++i) v->items[i].block = &doc->blocks[i];
+    for (int i = 0; i < doc->block_count; ++i) {
+        v->items[i].block = &doc->blocks[i];
+        if (i < old_count) v->items[i].hscroll = old_h[i];
+    }
+    SDL_free(old_h);
 
     float target = keep_scroll ? old_scroll : 0;
     layout_until(v, -1, target + 2 * v->height);
@@ -841,6 +852,26 @@ void view_scroll_to(View *v, float y)
 void view_scroll_by(View *v, float dy)
 {
     view_scroll_to(v, v->scroll + dy);
+}
+
+bool view_hscroll_at(View *v, float x, float y, float dx)
+{
+    if (!v->doc) return false;
+    const float dy = y + v->scroll, pad = CODE_PAD * v->scale;
+    for (int i = 0; i < v->laid; ++i) {
+        ViewItem *it = &v->items[i];
+        if (it->block->kind != BLOCK_CODE && it->block->kind != BLOCK_HTML) continue;
+        if (dy < it->box_y || dy >= it->box_y + it->box_h) continue;
+        if (x < it->x - pad || x >= it->x + it->w + pad) return false;
+        float max = SDL_max(0.0f, it->para.w - it->w);
+        if (max <= 0) return false;
+        float h = SDL_clamp(SDL_roundf(it->hscroll + dx), 0.0f, max);
+        float delta = h - it->hscroll;
+        it->hscroll = h;
+        for (int k = it->para.first; k < it->para.first + it->para.count; ++k) v->frags[k].ax -= delta;
+        return true;
+    }
+    return false;
 }
 
 bool view_at_end(const View *v)
@@ -1056,8 +1087,22 @@ void view_draw(View *v, SDL_Renderer *r)
             /* Long lines are clipped to the box (no wrapping in code). */
             SDL_Rect clip = {(int)box.x, (int)box.y, (int)box.w, (int)box.h};
             SDL_SetRenderClipRect(r, &clip);
-            draw_para(v, r, &it->para, it->x, it->y + dy);
+            draw_para(v, r, &it->para, it->x - it->hscroll, it->y + dy);
             SDL_SetRenderClipRect(r, NULL);
+            /* Lines wider than the box scroll sideways (Shift+wheel or a
+             * horizontal wheel / touchpad); a thin bar shows where. */
+            if (it->para.w > it->w) {
+                float track = box.w - 2 * pad;
+                float thumb = SDL_max(track * it->w / it->para.w, 24 * s);
+                float pos = (track - thumb) * it->hscroll / (it->para.w - it->w);
+                float bh = SDL_max(1.0f, SDL_roundf(3 * s));
+                SDL_FRect bar = {SDL_roundf(box.x + pad + pos), SDL_roundf(box.y + box.h - bh - 4 * s),
+                                 SDL_roundf(thumb), bh};
+                SDL_Color c = th->muted;
+                c.a = 0x70;
+                set_color(r, c);
+                SDL_RenderFillRect(r, &bar);
+            }
             continue;
         }
         case BLOCK_TABLE:
@@ -1329,6 +1374,15 @@ void view_draw_selection(View *v, SDL_Renderer *r)
         }
         if (x1 <= x0) continue;
         SDL_FRect rect = {f->ax + x0, f->ay - v->scroll, x1 - x0, f->h};
+        const ViewItem *it = &v->items[f->item];
+        if (it->block->kind == BLOCK_CODE || it->block->kind == BLOCK_HTML) {
+            /* Scrolled code: only the part inside the box. */
+            float l = it->x - CODE_PAD * v->scale, rr = it->x + it->w + CODE_PAD * v->scale;
+            float a0 = SDL_max(rect.x, l), a1 = SDL_min(rect.x + rect.w, rr);
+            if (a1 <= a0) continue;
+            rect.x = a0;
+            rect.w = a1 - a0;
+        }
         SDL_RenderFillRect(r, &rect);
     }
 }
