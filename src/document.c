@@ -732,6 +732,134 @@ static Document *fail(Document *doc, const char *what)
     return doc;
 }
 
+/* ------------------------------------------------- code highlighting -- */
+
+/* Syntax highlighting of fenced code (spans with colour classes). Most of
+ * the time goes into compiling each language's highlight query once (35 ms
+ * for C#), so the languages run in parallel: one thread per language, each
+ * with its own span list, merged in block order at the end. doc->strings is
+ * not modified meanwhile, so the threads can read it. */
+typedef struct HlJob {
+    Document *doc;
+    const char *lang;     /* the first word of the info string */
+    size_t lang_len;
+    Span *spans;
+    uint32_t count, cap;
+} HlJob;
+
+#define MAX_HL_JOBS 16
+
+static size_t lang_word(const char *s, size_t n)
+{
+    size_t i = 0;
+    while (i < n && s[i] != ' ' && s[i] != '{' && s[i] != ',') i++;
+    return i;
+}
+
+static bool job_owns(const HlJob *j, const Document *doc, const Block *b)
+{
+    const char *l = document_str(doc, b->lang);
+    size_t n = lang_word(l, b->lang_len);
+    return n == j->lang_len && SDL_strncasecmp(l, j->lang, n) == 0;
+}
+
+static void highlight_job(HlJob *j)
+{
+    Document *doc = j->doc;
+    for (int i = 0; i < doc->block_count; ++i) {
+        Block *b = &doc->blocks[i];
+        if (b->kind != BLOCK_CODE || !b->lang_len || !job_owns(j, doc, b)) continue;
+        /* Offsets into this job's span list until the merge. */
+        b->span_first = j->count;
+        highlight_code(document_str(doc, b->lang), b->lang_len,
+                       document_str(doc, b->text), b->text_len,
+                       &j->spans, &j->count, &j->cap);
+        b->span_count = j->count - b->span_first;
+        TIMING_MARK("highlight %.*s block (%u bytes)", (int)b->lang_len, document_str(doc, b->lang),
+                    b->text_len);
+    }
+}
+
+typedef struct HlPool {
+    HlJob *jobs;
+    int count;
+    SDL_AtomicInt next;
+} HlPool;
+
+static void run_highlight_jobs(HlPool *pool)
+{
+    for (;;) {
+        int k = SDL_AddAtomicInt(&pool->next, 1);
+        if (k >= pool->count) break;
+        highlight_job(&pool->jobs[k]);
+    }
+}
+
+static int SDLCALL highlight_worker(void *arg)
+{
+    TIMING_THREAD("hl");
+    run_highlight_jobs(arg);
+    return 0;
+}
+
+static void highlight_blocks(Document *doc)
+{
+    HlJob jobs[MAX_HL_JOBS];
+    int njobs = 0;
+    int8_t *owner = SDL_malloc((size_t)(doc->block_count ? doc->block_count : 1));
+    if (!owner) return;
+    for (int i = 0; i < doc->block_count; ++i) {
+        Block *b = &doc->blocks[i];
+        owner[i] = -1;
+        if (b->kind != BLOCK_CODE || !b->lang_len) continue;
+        int k = 0;
+        while (k < njobs && !job_owns(&jobs[k], doc, b)) k++;
+        if (k == njobs) {
+            if (njobs == MAX_HL_JOBS) continue; /* rare: left plain */
+            const char *l = document_str(doc, b->lang);
+            jobs[njobs] = (HlJob){doc, l, lang_word(l, b->lang_len), NULL, 0, 0};
+            njobs++;
+        }
+        owner[i] = (int8_t)k;
+    }
+    if (njobs == 0) {
+        SDL_free(owner);
+        return;
+    }
+
+    /* A few workers take languages from the list until it is empty; the
+     * loader is one of them. Not one thread per language: on a busy start
+     * that would crowd out the font and main threads. */
+    HlPool pool = {jobs, njobs, {0}};
+    /* Main, font and unpack threads are busy too at this point. */
+    int extra = SDL_clamp(SDL_GetNumLogicalCPUCores() - 3, 0, njobs - 1);
+    SDL_Thread *threads[MAX_HL_JOBS] = {0};
+    for (int k = 0; k < extra; ++k) threads[k] = SDL_CreateThread(highlight_worker, "md-highlight", &pool);
+    TIMING_MARK("start highlighting (%d languages, %d threads)", njobs, extra + 1);
+    run_highlight_jobs(&pool);
+    for (int k = 0; k < extra; ++k) {
+        if (threads[k]) SDL_WaitThread(threads[k], NULL);
+    }
+    TIMING_MARK("wait for highlighting");
+
+    /* Merge: every block's spans move to the end of doc->spans. */
+    for (int i = 0; i < doc->block_count; ++i) {
+        Block *b = &doc->blocks[i];
+        if (owner[i] < 0) continue;
+        const HlJob *j = &jobs[owner[i]];
+        const uint32_t first = b->span_first, n = b->span_count;
+        b->span_first = doc->span_count;
+        b->span_count = 0;
+        for (uint32_t s = 0; s < n; ++s) {
+            GROW(doc->spans, doc->span_count, doc->span_cap, 256);
+            doc->spans[doc->span_count++] = j->spans[first + s];
+            b->span_count++;
+        }
+    }
+    for (int k = 0; k < njobs; ++k) SDL_free(jobs[k].spans);
+    SDL_free(owner);
+}
+
 static Document *parse(Document *doc)
 {
     if (doc->source_len > UINT32_MAX / 4) {
@@ -791,18 +919,7 @@ static Document *parse(Document *doc)
     ts_parser_delete(parser);
     TIMING_MARK("inline parse (%u runs)", bd.pending_count);
 
-    /* Syntax highlighting of fenced code (spans with colour classes). */
-    for (int i = 0; i < doc->block_count; ++i) {
-        Block *b = &doc->blocks[i];
-        if (b->kind != BLOCK_CODE || !b->lang_len) continue;
-        b->span_first = doc->span_count;
-        highlight_code(document_str(doc, b->lang), b->lang_len,
-                       document_str(doc, b->text), b->text_len,
-                       &doc->spans, &doc->span_count, &doc->span_cap);
-        b->span_count = doc->span_count - b->span_first;
-        TIMING_MARK("highlight %.*s block (%u bytes)", (int)b->lang_len, document_str(doc, b->lang),
-                    b->text_len);
-    }
+    highlight_blocks(doc);
 
     SDL_free(bd.pending);
     SDL_free(bd.defs);
