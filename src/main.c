@@ -23,6 +23,7 @@
 #include "images.h"
 #include "nvim.h"
 #include "theme.h"
+#include "timing.h"
 #include "view.h"
 
 static App app;
@@ -32,6 +33,7 @@ static App app;
 static int SDLCALL font_thread_main(void *unused)
 {
     (void)unused;
+    TIMING_THREAD("fonts");
     return fonts_init(16.0f) ? 0 : -1;
 }
 
@@ -57,6 +59,7 @@ static void publish_document(Document *doc)
 static int SDLCALL loader_thread_main(void *arg)
 {
     char *path = arg;
+    TIMING_THREAD("loader");
     Document *doc = document_load(path);
     SDL_free(path);
     publish_document(doc);
@@ -72,6 +75,7 @@ typedef struct ParseJob {
 static int SDLCALL parse_thread_main(void *arg)
 {
     ParseJob *job = arg;
+    TIMING_THREAD("parse");
     Document *doc = document_parse(job->name, job->text, job->len);
     SDL_free(job->name);
     SDL_free(job);
@@ -246,6 +250,7 @@ static void take_loaded_document(void)
     if (!app.fonts_ok) return;
     Document *doc = SDL_SetAtomicPointer(&app.loaded_doc, NULL);
     if (!doc) return;
+    TIMING_MARK("document ready (incl. waiting for the loader)");
 
     bool same_file = app.view.doc && doc->path && app.view.doc->path &&
                      SDL_strcmp(doc->path, app.view.doc->path) == 0;
@@ -254,7 +259,9 @@ static void take_loaded_document(void)
     bool follow = editor_visible() && app.nvim.attached && app.nvim.top_line > 0;
     view_set_document(&app.view, doc, same_file || follow);
     if (follow) follow_editor();
+    TIMING_MARK("lay out first screen (%d of %d blocks)", app.view.laid, doc->block_count);
     update_title();
+    TIMING_MARK("set window title");
     app.dirty = true;
 
     /* A preview parse finished: run the one that queued up meanwhile. */
@@ -276,6 +283,11 @@ static void pump_nvim(void)
         if (nv->flushed) {
             nv->flushed = false;
             app.dirty = true;
+#if MD_TIMING
+            static bool first_flush = true;
+            if (first_flush) TIMING_EVENT("Neovim first redraw received");
+            first_flush = false;
+#endif
         }
         if (nv->text_changed) nvim_request_text(nv);
         if (nv->buf_ready) {
@@ -538,8 +550,19 @@ static void draw_help(SDL_Renderer *r)
     SDL_SetRenderClipRect(r, NULL);
 }
 
+#if MD_TIMING
+static int timing_frame;
+#endif
+
 static void render(void)
 {
+#if MD_TIMING
+    /* The page is complete once the fonts are in and no document is still
+     * being read or waiting to be picked up. */
+    const bool settled = app.fonts_ok && SDL_GetAtomicInt(&app.loads_pending) == 0 &&
+                         SDL_GetAtomicPointer(&app.loaded_doc) == NULL;
+    ++timing_frame;
+#endif
     SDL_Renderer *r = app.renderer;
     const Theme *th = &app.view.theme;
     SDL_SetRenderViewport(r, NULL);
@@ -582,8 +605,13 @@ static void render(void)
     draw_search_bar(r);
     draw_help(r);
     draw_toast(r);
+    TIMING_MARK("frame %d: draw", timing_frame);
     SDL_RenderPresent(r);
+    TIMING_MARK("frame %d: present (waits for vsync)", timing_frame);
     app.dirty = false;
+#if MD_TIMING
+    if (settled) TIMING_FIRST_FULL_RENDER();
+#endif
 }
 
 /* ------------------------------------------------------------- input -- */
@@ -874,8 +902,10 @@ static bool ensure_nvim(void)
     app.nvim_starting = false;
     app.nvim.wake_event = app.wake_event;
     app.nvim_ok = app.fonts_ok && nvim_wait_started(&app.nvim);
+    TIMING_MARK("wait for Neovim start thread");
     if (app.nvim_ok) {
         editor_init(&app.editor, app.engine, &app.nvim);
+        TIMING_MARK("editor_init");
     } else {
         char msg[96];
         SDL_snprintf(msg, sizeof msg, "Could not start Neovim%s%s",
@@ -1502,7 +1532,9 @@ static bool handle_event(const SDL_Event *e)
             take_loaded_document();
             pump_nvim();
             if (app.fonts_ok && images_pump(app.renderer)) {
+                TIMING_EVENT("upload decoded images to GPU");
                 view_relayout(&app.view);
+                TIMING_EVENT("relayout for image sizes");
                 app.dirty = true;
             }
             if (app.nvim_ok && nvim_has_exited(&app.nvim)) return false;
@@ -1531,17 +1563,22 @@ static void sync_editor_to_viewer(void)
 int main(int argc, char **argv)
 {
     /* md [-e | --edit] [file.md]; --help and --version end here. */
+    TIMING_INIT();
     CliOptions opts;
     int status = cli_parse(argc, argv, &opts);
     if (status >= 0) return status;
+    TIMING_MARK("parse command line");
     const char *file = opts.file;
     const bool edit = opts.edit;
 
     /* 1. Kick off background work before touching the window system. */
     app.font_thread = SDL_CreateThread(font_thread_main, "md-fonts", NULL);
+    TIMING_MARK("spawn font thread");
     if (file) start_load(file);
+    TIMING_MARK("spawn loader thread");
     app.start_file = file;
     if (edit) begin_nvim(file); /* overlaps with window creation */
+    TIMING_MARK("spawn Neovim start thread (-e only)");
 
     /* 2. Window + renderer. */
     SDL_SetHint(SDL_HINT_RENDER_VSYNC, "1");
@@ -1549,11 +1586,14 @@ int main(int argc, char **argv)
         SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, APP_NAME, SDL_GetError(), NULL);
         return 1;
     }
+    TIMING_MARK("SDL_Init(VIDEO)");
     app.wake_event = SDL_RegisterEvents(1);
     images_init(app.wake_event);
+    TIMING_MARK("register events, image loader init");
     app.theme_forced = opts.theme != CLI_THEME_SYSTEM;
     app.dark = app.theme_forced ? opts.theme == CLI_THEME_DARK
                                 : SDL_GetSystemTheme() == SDL_SYSTEM_THEME_DARK;
+    TIMING_MARK("read system theme");
     /* Open as a viewer; Ctrl+Shift+S (or Ctrl+Shift+E) starts Neovim and
      * brings in the editor. */
     app.layout = LAYOUT_VIEWER;
@@ -1567,6 +1607,7 @@ int main(int argc, char **argv)
         SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, APP_NAME, SDL_GetError(), NULL);
         return 1;
     }
+    TIMING_MARK("create window + renderer (%s)", SDL_GetRendererName(app.renderer));
 
     /* 3. First frame: just the background colours, then show the window.
      *    Presenting before showing avoids a white/black flash. */
@@ -1577,14 +1618,17 @@ int main(int argc, char **argv)
         app.nvim_ok = true;
     }
     relayout();
+    TIMING_MARK("lay out panes (empty frame)");
     render();
     SDL_ShowWindow(app.window);
+    TIMING_MARK("show window");
     app.nvim_ok = false;
     app.layout = LAYOUT_VIEWER;
 
     /* 4. Text needs the fonts; by now they are usually ready. */
     int font_status = -1;
     SDL_WaitThread(app.font_thread, &font_status);
+    TIMING_MARK("wait for font thread");
     app.font_thread = NULL;
     app.fonts_ok = font_status == 0;
     if (!app.fonts_ok) {
@@ -1594,9 +1638,11 @@ int main(int argc, char **argv)
         app.engine = TTF_CreateRendererTextEngine(app.renderer);
     }
     view_init(&app.view, app.engine, theme);
+    TIMING_MARK("create text engine, init view");
 
     if (edit) set_layout(LAYOUT_VIEWER); /* toggles to the split, focus on the editor */
     else relayout();
+    TIMING_MARK("lay out panes");
     take_loaded_document(); /* in case the loader already finished */
     render();
 
@@ -1608,7 +1654,17 @@ int main(int argc, char **argv)
             /* Lay out the rest of a long document while idle, in small
              * slices so input stays responsive. */
             if (!SDL_PollEvent(&e)) {
+#if MD_TIMING
+                if (!view_layout_more(&app.view, 4)) {
+                    static bool first_layout_done = true;
+                    if (first_layout_done) {
+                        TIMING_EVENT("background layout finished (%d blocks)", app.view.item_count);
+                    }
+                    first_layout_done = false;
+                }
+#else
                 view_layout_more(&app.view, 4);
+#endif
                 continue;
             }
         } else if (!SDL_WaitEvent(&e)) {

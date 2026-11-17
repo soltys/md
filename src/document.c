@@ -1,5 +1,6 @@
 #include "document.h"
 #include "highlight.h"
+#include "timing.h"
 
 #include <SDL3/SDL.h>
 #include <tree_sitter/api.h>
@@ -744,7 +745,9 @@ static Document *parse(Document *doc)
 
     TSParser *parser = ts_parser_new();
     ts_parser_set_language(parser, tree_sitter_markdown());
+    TIMING_MARK("(parser setup)");
     TSTree *tree = ts_parser_parse_string(parser, NULL, doc->source, src_len);
+    TIMING_MARK("tree-sitter block parse (%u bytes)", src_len);
     if (!tree) {
         ts_parser_delete(parser);
         SDL_asprintf(&doc->error, "Cannot parse file");
@@ -755,6 +758,7 @@ static Document *parse(Document *doc)
     Ctx ctx = {0};
     walk(&bd, ts_tree_root_node(tree), &ctx);
     ts_tree_delete(tree);
+    TIMING_MARK("build block list (%d blocks)", doc->block_count);
 
     /* Inline pass, now that all link reference definitions are known. */
     ts_parser_set_language(parser, tree_sitter_markdown_inline());
@@ -777,6 +781,7 @@ static Document *parse(Document *doc)
         }
     }
     ts_parser_delete(parser);
+    TIMING_MARK("inline parse (%u runs)", bd.pending_count);
 
     /* Syntax highlighting of fenced code (spans with colour classes). */
     for (int i = 0; i < doc->block_count; ++i) {
@@ -787,6 +792,8 @@ static Document *parse(Document *doc)
                        document_str(doc, b->text), b->text_len,
                        &doc->spans, &doc->span_count, &doc->span_cap);
         b->span_count = doc->span_count - b->span_first;
+        TIMING_MARK("highlight %.*s block (%u bytes)", (int)b->lang_len, document_str(doc, b->lang),
+                    b->text_len);
     }
 
     SDL_free(bd.pending);
@@ -799,6 +806,7 @@ Document *document_load(const char *path)
     Document *doc = SDL_calloc(1, sizeof(Document));
     doc->path = SDL_strdup(path);
     doc->source = SDL_LoadFile(path, &doc->source_len);
+    TIMING_MARK("read file (%u bytes)", (unsigned)doc->source_len);
     if (!doc->source) return fail(doc, "Cannot open file");
     return parse(doc);
 }

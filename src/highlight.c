@@ -1,5 +1,6 @@
 #include "highlight.h"
 #include "regex.h"
+#include "timing.h"
 
 #include <SDL3/SDL.h>
 #include <tree_sitter/api.h>
@@ -158,11 +159,13 @@ static TSQuery *get_query(Lang *l, uint8_t **classes)
 
     uint32_t err_off;
     TSQueryError err;
+    TIMING_MARK("(highlight setup)");
     q = ts_query_new(l->language(), src, (uint32_t)(base_len + 1 + len), &err_off, &err);
     if (!q && base_len) { /* base query not compatible: use the language's own */
         q = ts_query_new(l->language(), (const char *)l->query, (uint32_t)len, &err_off, &err);
     }
     SDL_free(src);
+    TIMING_MARK("compile highlight query [%s]", l->aliases);
     if (!q) return NULL;
 
     uint32_t nc = ts_query_capture_count(q);

@@ -1,5 +1,6 @@
 #include "fonts.h"
 #include "assets.h"
+#include "timing.h"
 
 #include <SDL3/SDL.h>
 
@@ -29,6 +30,16 @@ static const int face_asset[FONT_FACE_COUNT] = {
     [FONT_MONO_BOLD_ITALIC] = ASSET_ROBOTO_MONO_BOLD_ITALIC,
 };
 
+#if MD_TIMING
+static const char *const face_name[FONT_FACE_COUNT] = {
+    [FONT_REGULAR] = "Roboto Regular", [FONT_ITALIC] = "Roboto Italic",
+    [FONT_MEDIUM] = "Roboto Medium", [FONT_BOLD] = "Roboto Bold",
+    [FONT_BOLD_ITALIC] = "Roboto Bold Italic", [FONT_LIGHT] = "Roboto Light",
+    [FONT_MONO] = "Roboto Mono", [FONT_MONO_ITALIC] = "Roboto Mono Italic",
+    [FONT_MONO_BOLD] = "Roboto Mono Bold", [FONT_MONO_BOLD_ITALIC] = "Roboto Mono Bold Italic",
+};
+#endif
+
 static FontEntry cache[MAX_CACHED_FONTS];
 static int cache_count;
 
@@ -53,7 +64,9 @@ static TTF_Font *create_entry(FontFace face, float px)
         /* Should never happen in practice; fall back to the nearest size. */
         return cache[0].font;
     }
+    TIMING_MARK("(work before font open)");
     TTF_Font *font = open_asset(face_asset[face], px);
+    TIMING_MARK("open font %s %.2fpx", face_name[face], px);
     if (!font) return NULL;
 
     /* One set of fallback faces per size, shared by all text faces of that
@@ -71,9 +84,13 @@ static TTF_Font *create_entry(FontFace face, float px)
     }
     if (!emoji) {
         math = open_asset(ASSET_NOTO_MATH, px);
+        TIMING_MARK("open fallback Noto Sans Math %.2fpx", px);
         symbols = open_asset(ASSET_NOTO_SYMBOLS2, px);
+        TIMING_MARK("open fallback Noto Sans Symbols 2 %.2fpx", px);
         nerd = open_asset(ASSET_ROBOTO_MONO, px);
+        TIMING_MARK("open fallback Roboto Mono (Nerd icons) %.2fpx", px);
         emoji = open_asset(ASSET_NOTO_EMOJI, px);
+        TIMING_MARK("open fallback Noto Color Emoji %.2fpx", px);
         owns = true;
     }
     if (math) TTF_AddFallbackFont(font, math);
@@ -82,6 +99,7 @@ static TTF_Font *create_entry(FontFace face, float px)
                 face == FONT_MONO_BOLD_ITALIC;
     if (nerd && !mono) TTF_AddFallbackFont(font, nerd);
     if (emoji) TTF_AddFallbackFont(font, emoji);
+    TIMING_MARK("attach fallbacks to %s %.2fpx", face_name[face], px);
 
     FontEntry *e = &cache[cache_count++];
     e->face = face;
@@ -98,6 +116,7 @@ static TTF_Font *create_entry(FontFace face, float px)
 bool fonts_init(float warm_px)
 {
     if (!TTF_Init()) return false;
+    TIMING_MARK("TTF_Init (FreeType, HarfBuzz)");
     /* Warm the body font (and with it FreeType, HarfBuzz and the emoji face)
      * so the first frame only has to rasterise glyphs. */
     return create_entry(FONT_REGULAR, warm_px) != NULL;

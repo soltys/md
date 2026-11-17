@@ -1,5 +1,6 @@
 #include "nvim.h"
 #include "assets.h"
+#include "timing.h"
 
 #ifdef _WIN32
 #include <windows.h>
@@ -63,8 +64,10 @@ static void make_blocking(SDL_IOStream *io)
 static int SDLCALL start_thread_main(void *userdata)
 {
     Nvim *nv = userdata;
+    TIMING_THREAD("nvim");
 
     nv->config_path = install_config();
+    TIMING_MARK("write Neovim config");
     if (!nv->config_path) {
         SDL_asprintf(&nv->error, "Cannot write Neovim config: %s", SDL_GetError());
         return -1;
@@ -87,6 +90,7 @@ static int SDLCALL start_thread_main(void *userdata)
     SDL_SetBooleanProperty(props, SDL_PROP_PROCESS_CREATE_BACKGROUND_BOOLEAN, true); /* no console */
     nv->process = SDL_CreateProcessWithProperties(props);
     SDL_DestroyProperties(props);
+    TIMING_MARK("spawn nvim --embed");
 
     if (!nv->process) {
         SDL_asprintf(&nv->error, "Cannot start nvim (is it on PATH?): %s", SDL_GetError());

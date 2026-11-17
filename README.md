@@ -241,6 +241,37 @@ see its README.
 6. Images and syntax highlighting queries load lazily on worker threads.
 7. The window is DPI-aware through the manifest, so it opens at the right size.
 
+### Startup timing log
+
+To see where the time goes, md can log every step from process creation to
+the first full render of the page: time before `main()`, `SDL_Init`, window
+and renderer creation, each font face and fallback opened, reading and
+parsing the file (block parse, inline parse, each highlighted code block and
+query compile), laying out the first screen, and each frame's draw and
+present. Every line shows the running total since the process was created
+and the step's own duration (time since the previous mark on the same
+thread), so the main thread and the font/loader threads can be read side by
+side.
+
+- **Debug** builds always log.
+- **Release** builds log only when configured with `-DMD_TIMING_LOG=ON`
+  (default `OFF`). With the option off the logging compiles out completely,
+  so the normal Release build is not slowed down at all.
+
+```bat
+cmake --preset vs2026 -DMD_TIMING_LOG=ON
+cmake --build --preset release
+build\vs2026\Release\md.exe README.md
+```
+
+Nothing is written while starting (marks are collected in memory); the
+report is printed right after the first full render to `%TEMP%\md-timing.log`,
+to the debugger output (Visual Studio, DebugView), and to the console md was
+started from, or to stderr when it is redirected (`md README.md 2> t.txt`).
+Later one-off events (images decoded, background layout of the rest of the
+document finished, Neovim's first redraw) are appended as they happen.
+Turn the option off again (`-DMD_TIMING_LOG=OFF`) before installing.
+
 ## ![](art/png/folder@3x.png) Source layout
 
 | File | Purpose |

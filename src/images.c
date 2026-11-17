@@ -1,5 +1,6 @@
 #include "images.h"
 #include <SDL3_image/SDL_image.h>
+#include "timing.h"
 
 static Image **cache;
 static int cache_count, cache_cap;
@@ -12,12 +13,14 @@ typedef struct Job { Image *img; char *path; } Job;
 static int SDLCALL load_main(void *arg)
 {
     Job *job = arg;
+    TIMING_THREAD("image");
     SDL_Surface *s = IMG_Load(job->path);
     if (s && s->format != SDL_PIXELFORMAT_RGBA32) {
         SDL_Surface *c = SDL_ConvertSurface(s, SDL_PIXELFORMAT_RGBA32);
         SDL_DestroySurface(s);
         s = c;
     }
+    TIMING_EVENT("decode image %s", job->path);
     SDL_LockMutex(lock);
     job->img->surface = s;
     if (!s) job->img->state = IMAGE_FAILED;

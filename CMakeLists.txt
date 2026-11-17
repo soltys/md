@@ -70,6 +70,8 @@ add_executable(md WIN32
     src/highlight.h
     src/regex.c
     src/regex.h
+    src/timing.c
+    src/timing.h
     ${MD_QUERIES_SOURCE}
 )
 
@@ -86,6 +88,14 @@ target_include_directories(md PRIVATE src "${CMAKE_CURRENT_BINARY_DIR}/generated
 # The version comes from project() above; md --version prints it and on
 # Windows it is also in the file's properties (Details tab).
 target_compile_definitions(md PRIVATE MD_VERSION="${PROJECT_VERSION}")
+
+# Startup timing log (src/timing.h): every step from process start to the
+# first full render, written to the debugger, the console and
+# %TEMP%\md-timing.log. Always on in Debug; other configurations only with
+# -DMD_TIMING_LOG=ON. When off, the logging compiles out completely.
+option(MD_TIMING_LOG "Log startup timing in Release builds too (Debug always logs)" OFF)
+target_compile_definitions(md PRIVATE
+    $<IF:$<OR:$<CONFIG:Debug>,$<BOOL:${MD_TIMING_LOG}>>,MD_TIMING=1,MD_TIMING=0>)
 
 target_link_libraries(md PRIVATE
     SDL3::SDL3-static
