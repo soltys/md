@@ -84,3 +84,16 @@ size_t emoji_cluster(const char *s, size_t n)
     }
     return pos;
 }
+
+bool text_has_emoji(const char *s, size_t n)
+{
+    for (size_t i = 0; i < n; ++i) {
+        unsigned char c = (unsigned char)s[i];
+        if (c < 0xC0) continue; /* ASCII or a continuation byte */
+        /* U+20E3 (keycap) means the digit before it is an emoji. */
+        if (c == 0xE2 && i + 2 < n && (unsigned char)s[i + 1] == 0x83 &&
+            (unsigned char)s[i + 2] == 0xA3) return true;
+        if (emoji_cluster(s + i, n - i)) return true;
+    }
+    return false;
+}

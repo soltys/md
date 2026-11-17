@@ -14,4 +14,8 @@ size_t utf8_decode(const char *s, size_t n, uint32_t *cp);
  * the whole sequence in one font. */
 size_t emoji_cluster(const char *s, size_t n);
 
+/* True if the text contains any emoji (a quick scan; the loader uses it to
+ * start unpacking the emoji font early). */
+bool text_has_emoji(const char *s, size_t n);
+
 #endif

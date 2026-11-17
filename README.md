@@ -227,19 +227,39 @@ see its README.
 
 ## ![](art/png/bolt@3x.png) How startup is kept fast
 
-1. Before `SDL_Init`, three threads start: one initialises FreeType/HarfBuzz
-   and opens the embedded fonts, one reads and parses the file, one writes the
-   Neovim config and spawns `nvim --embed`.
-2. The main thread creates the window and renderer, presents one frame in the
-   background colour and only then shows the window, so there is no flash.
+1. Before `SDL_Init`, worker threads start: one initialises FreeType/HarfBuzz
+   and opens the body font, one reads and parses the file, one (`-e` only)
+   writes the Neovim config and spawns `nvim --embed`, and one creates a
+   throwaway Direct3D 11 device so the GPU driver loads while the main thread
+   runs `SDL_Init` and creates the window (`src/gpu_warm.c`).
+2. The main thread creates the window hidden, then the renderer. When the
+   fonts are ready by then (the usual case), the first frame drawn is the
+   real page and the window is shown with it; otherwise it presents one frame
+   in the background colour, shows the window, and fills it in after.
+   Either way there is no flash.
 3. The main thread waits for the fonts only when it is about to draw text.
-4. Fonts are never copied: FreeType reads them straight from the executable's
-   resource section, and only the pages it touches get loaded.
-5. Only the visible part of the document is laid out before the first frame;
+4. The fonts are stored zstd-compressed in the executable (38 MB of TTF in
+   about 14 MB; CMake compresses them once at configure time,
+   `-DMD_COMPRESS_FONTS=OFF` embeds them as they are). A smaller md.exe is
+   quicker for Windows to map and for antivirus to scan, which on the first
+   start of a new build is the slowest thing of all. Each font is unpacked
+   once, on a worker thread where possible: the body and fallback fonts on
+   the font thread, the other faces right after it.
+5. Noto Color Emoji (25 MB) is unpacked only for documents that contain
+   emoji (the loader starts it as soon as it has read the file) and opened
+   only for the text sizes that actually show an emoji.
+6. Only the visible part of the document is laid out before the first frame;
    the rest is laid out in small slices while the app is idle. Text objects
    are created the first time a line is drawn.
-6. Images and syntax highlighting queries load lazily on worker threads.
-7. The window is DPI-aware through the manifest, so it opens at the right size.
+7. Images and syntax highlighting queries load lazily on worker threads.
+8. DLLs that are not needed for the first frame (shell32, ole32, setupapi,
+   ...) are delay-loaded, so Windows does not load them before `main()`.
+9. The window is DPI-aware through the manifest, so it opens at the right size.
+
+Which renderer starts fastest depends on the GPU driver. md uses SDL's
+default (Direct3D 11 on Windows); `--renderer=NAME` or the `MD_RENDERER`
+environment variable picks another one: `direct3d12`, `opengl`, or
+`software`, which loads no GPU driver at all.
 
 ### Startup timing log
 
@@ -268,8 +288,12 @@ Nothing is written while starting (marks are collected in memory); the
 report is printed right after the first full render to `%TEMP%\md-timing.log`,
 to the debugger output (Visual Studio, DebugView), and to the console md was
 started from, or to stderr when it is redirected (`md README.md 2> t.txt`).
-Later one-off events (images decoded, background layout of the rest of the
-document finished, Neovim's first redraw) are appended as they happen.
+Below the table the report says how much CPU time md itself used before
+`main()` and which DLLs Windows had loaded by then: when the CPU time is far
+below the wall time, the wait happened outside md (typically antivirus
+scanning the executable). Later one-off events (images decoded, fonts
+unpacked or opened after the first frame, background layout of the rest of
+the document finished, Neovim's first redraw) are appended as they happen.
 A toast in the window also shows the time to the first full render and the
 log file's path, so the result is visible even when md is started from
 Explorer. `md --version` prints `startup timing log: on` or `off`, to check
@@ -287,7 +311,8 @@ installing.
 | `src/highlight.c`, `src/regex.c` | Code block highlighting with tree-sitter queries |
 | `src/nvim.c`, `src/msgpack.c` | Neovim process and msgpack-RPC UI client |
 | `src/editor.c` | Draws Neovim's grid |
-| `src/fonts.c`, `src/assets.c` | Embedded fonts (RCDATA) and font cache |
+| `src/fonts.c`, `src/assets.c` | Embedded fonts (zstd-compressed RCDATA, unpacked on first use) and font cache |
+| `src/gpu_warm.c` | Loads the Direct3D 11 driver on a helper thread during startup |
 | `src/emoji.c`, `src/images.c` | Emoji clustering, async image loading |
 | `art/` | PICO-8 sprite sheets and the PNGs generated from them by [pixelart](https://github.com/soltys/pixelart) |
 

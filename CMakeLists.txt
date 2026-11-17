@@ -47,6 +47,8 @@ add_executable(md WIN32
     src/asset_ids.h
     src/fonts.c
     src/fonts.h
+    src/gpu_warm.c
+    src/gpu_warm.h
     src/document.c
     src/document.h
     src/view.c
@@ -109,6 +111,7 @@ target_link_libraries(md PRIVATE
     md_tree_sitter
     md_ts_markdown
     md_ts_markdown_inline
+    md_zstd
     ${MD_GRAMMAR_LIBS}
 )
 
@@ -147,6 +150,16 @@ if(MSVC)
         $<$<CONFIG:Release,MinSizeRel>:/GS->)
     target_compile_definitions(md PRIVATE _CRT_SECURE_NO_WARNINGS WIN32_LEAN_AND_MEAN NOMINMAX)
     target_link_options(md PRIVATE /OPT:REF /OPT:ICF /INCREMENTAL:NO)
+    # Windows loads every DLL in md.exe's import table (and their imports)
+    # before main() runs. These are not needed to put the first page on
+    # screen, or only later on: load them when first called instead. The
+    # startup log lists the DLLs that are still loaded before main().
+    # /IGNORE:4199: no warning for a DLL that this build does not import.
+    target_link_options(md PRIVATE
+        /DELAYLOAD:shell32.dll /DELAYLOAD:ole32.dll /DELAYLOAD:oleaut32.dll
+        /DELAYLOAD:setupapi.dll /DELAYLOAD:cfgmgr32.dll /DELAYLOAD:version.dll
+        /DELAYLOAD:winmm.dll /IGNORE:4199)
+    target_link_libraries(md PRIVATE delayimp)
 else()
     target_compile_options(md PRIVATE -Wall -Wextra -Wno-unused-parameter)
 endif()

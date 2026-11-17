@@ -110,3 +110,34 @@ foreach(_t md_tree_sitter md_ts_markdown md_ts_markdown_inline)
         target_compile_options(${_t} PRIVATE -w)
     endif()
 endforeach()
+
+# ---------------------------------------------------------------- zstd ----
+# Only the decoder: the embedded fonts are stored zstd-compressed (see
+# cmake/Fonts.cmake, compressed by CMake itself at configure time) and
+# unpacked on background threads when first needed (src/assets.c).
+FetchContent_Declare(zstd
+    URL      https://github.com/facebook/zstd/releases/download/v1.5.7/zstd-1.5.7.tar.gz
+    URL_HASH SHA256=eb33e51f49a15e023950cd7825ca74a4a2b43db8354825ac24fc1b7ee09e6fa3
+    SOURCE_SUBDIR do-not-add)
+FetchContent_MakeAvailable(zstd)
+
+set(_zl "${zstd_SOURCE_DIR}/lib")
+add_library(md_zstd STATIC
+    "${_zl}/common/debug.c"
+    "${_zl}/common/entropy_common.c"
+    "${_zl}/common/error_private.c"
+    "${_zl}/common/fse_decompress.c"
+    "${_zl}/common/xxhash.c"
+    "${_zl}/common/zstd_common.c"
+    "${_zl}/decompress/huf_decompress.c"
+    "${_zl}/decompress/zstd_ddict.c"
+    "${_zl}/decompress/zstd_decompress.c"
+    "${_zl}/decompress/zstd_decompress_block.c")
+target_include_directories(md_zstd SYSTEM PUBLIC "${_zl}")
+# No assembly (MSVC cannot build the .S file), no legacy formats, no threads.
+target_compile_definitions(md_zstd PRIVATE ZSTD_DISABLE_ASM=1 ZSTD_LEGACY_SUPPORT=0)
+if(MSVC)
+    target_compile_options(md_zstd PRIVATE /W0)
+else()
+    target_compile_options(md_zstd PRIVATE -w)
+endif()

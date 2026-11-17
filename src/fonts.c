@@ -10,8 +10,7 @@ typedef struct FontEntry {
     FontFace face;
     float px;
     TTF_Font *font;
-    TTF_Font *emoji; /* fallback, same size, shared between faces */
-    TTF_Font *math;  /* symbol fallbacks, shared the same way */
+    TTF_Font *math;  /* symbol fallbacks, same size, shared between faces */
     TTF_Font *symbols;
     TTF_Font *nerd;  /* Nerd Font icons for the proportional faces */
     bool owns_fallbacks;
@@ -43,6 +42,13 @@ static const char *const face_name[FONT_FACE_COUNT] = {
 static FontEntry cache[MAX_CACHED_FONTS];
 static int cache_count;
 
+/* Noto Color Emoji, one per size, opened only when some text needs it: it
+ * is a 25 MB font that takes ~4 ms to open per size (and must be unpacked
+ * first), and most documents have no emoji at all. */
+#define MAX_EMOJI_SIZES 32
+static struct { float px; TTF_Font *font; } emoji_cache[MAX_EMOJI_SIZES];
+static int emoji_count;
+
 static TTF_Font *open_asset(int asset, float px)
 {
     const void *data;
@@ -51,8 +57,8 @@ static TTF_Font *open_asset(int asset, float px)
         SDL_SetError("embedded asset %d missing", asset);
         return NULL;
     }
-    /* The IO stream only wraps the mapped bytes; FreeType reads tables lazily
-     * straight from the executable image. */
+    /* The IO stream only wraps the bytes (the mapped executable, or the
+     * unpacked copy of a compressed font); FreeType reads tables lazily. */
     SDL_IOStream *io = SDL_IOFromConstMem(data, size);
     if (!io) return NULL;
     return TTF_OpenFontIO(io, true, px);
@@ -72,40 +78,41 @@ static TTF_Font *create_entry(FontFace face, float px)
     /* One set of fallback faces per size, shared by all text faces of that
      * size. Symbols come before emoji so arrows and check marks stay plain
      * text glyphs (emoji_cluster() routes real emoji to the emoji face). */
-    TTF_Font *emoji = NULL, *math = NULL, *symbols = NULL, *nerd = NULL;
-    bool owns = false;
-    for (int i = 0; i < cache_count && !emoji; ++i) {
-        if (cache[i].px == px && cache[i].emoji) {
-            emoji = cache[i].emoji;
+    TTF_Font *math = NULL, *symbols = NULL, *nerd = NULL;
+    bool owns = true;
+    for (int i = 0; i < cache_count; ++i) {
+        if (cache[i].px == px && cache[i].owns_fallbacks) {
             math = cache[i].math;
             symbols = cache[i].symbols;
             nerd = cache[i].nerd;
+            owns = false;
+            break;
         }
     }
-    if (!emoji) {
+    if (owns) {
         math = open_asset(ASSET_NOTO_MATH, px);
         TIMING_MARK("open fallback Noto Sans Math %.2fpx", px);
         symbols = open_asset(ASSET_NOTO_SYMBOLS2, px);
         TIMING_MARK("open fallback Noto Sans Symbols 2 %.2fpx", px);
         nerd = open_asset(ASSET_ROBOTO_MONO, px);
         TIMING_MARK("open fallback Roboto Mono (Nerd icons) %.2fpx", px);
-        emoji = open_asset(ASSET_NOTO_EMOJI, px);
-        TIMING_MARK("open fallback Noto Color Emoji %.2fpx", px);
-        owns = true;
     }
     if (math) TTF_AddFallbackFont(font, math);
     if (symbols) TTF_AddFallbackFont(font, symbols);
     bool mono = face == FONT_MONO || face == FONT_MONO_ITALIC || face == FONT_MONO_BOLD ||
                 face == FONT_MONO_BOLD_ITALIC;
     if (nerd && !mono) TTF_AddFallbackFont(font, nerd);
-    if (emoji) TTF_AddFallbackFont(font, emoji);
+    /* The emoji face joins the chain only once it has been opened for this
+     * size (fonts_get_emoji), then for every face of that size. */
+    for (int i = 0; i < emoji_count; ++i) {
+        if (emoji_cache[i].px == px && emoji_cache[i].font) TTF_AddFallbackFont(font, emoji_cache[i].font);
+    }
     TIMING_MARK("attach fallbacks to %s %.2fpx", face_name[face], px);
 
     FontEntry *e = &cache[cache_count++];
     e->face = face;
     e->px = px;
     e->font = font;
-    e->emoji = emoji;
     e->math = math;
     e->symbols = symbols;
     e->nerd = nerd;
@@ -117,9 +124,26 @@ bool fonts_init(float warm_px)
 {
     if (!TTF_Init()) return false;
     TIMING_MARK("TTF_Init (FreeType, HarfBuzz)");
-    /* Warm the body font (and with it FreeType, HarfBuzz and the emoji face)
-     * so the first frame only has to rasterise glyphs. */
-    return create_entry(FONT_REGULAR, warm_px) != NULL;
+    /* Warm the body font (and with it FreeType, HarfBuzz and the symbol
+     * fallbacks) so the first frame only has to rasterise glyphs. */
+    if (!create_entry(FONT_REGULAR, warm_px)) return false;
+    /* Unpack the other faces in the background, roughly in the order a
+     * page asks for them, so the main thread finds them ready. The emoji
+     * font is not among them: see fonts_prefetch_emoji(). */
+    static const int later[] = {
+        ASSET_ROBOTO_BOLD, ASSET_ROBOTO_MEDIUM, ASSET_ROBOTO_ITALIC,
+        ASSET_ROBOTO_MONO_BOLD, ASSET_ROBOTO_MONO_ITALIC, ASSET_ROBOTO_BOLD_ITALIC,
+        ASSET_ROBOTO_MONO_BOLD_ITALIC, ASSET_ROBOTO_LIGHT,
+    };
+    asset_prefetch(later, (int)SDL_arraysize(later));
+    TIMING_MARK("start unpacking the other faces");
+    return true;
+}
+
+void fonts_prefetch_emoji(void)
+{
+    static const int emoji[] = { ASSET_NOTO_EMOJI };
+    asset_prefetch(emoji, 1);
 }
 
 TTF_Font *fonts_get(FontFace face, float px)
@@ -136,11 +160,24 @@ TTF_Font *fonts_get(FontFace face, float px)
 TTF_Font *fonts_get_emoji(float px)
 {
     px = SDL_roundf(px * 4.0f) / 4.0f;
-    fonts_get(FONT_REGULAR, px);
-    for (int i = 0; i < cache_count; ++i) {
-        if (cache[i].face == FONT_REGULAR && cache[i].px == px) return cache[i].emoji;
+    for (int i = 0; i < emoji_count; ++i) {
+        if (emoji_cache[i].px == px) return emoji_cache[i].font;
     }
-    return NULL;
+    if (emoji_count == MAX_EMOJI_SIZES) return emoji_cache[0].font;
+    TIMING_MARK("(work before font open)");
+    TTF_Font *emoji = open_asset(ASSET_NOTO_EMOJI, px);
+    /* An event: emoji are often first needed after the first render. */
+    TIMING_EVENT("open Noto Color Emoji %.2fpx (first emoji at this size)", px);
+    /* Cached even when it failed, so a missing font is not retried for
+     * every emoji. */
+    emoji_cache[emoji_count].px = px;
+    emoji_cache[emoji_count].font = emoji;
+    emoji_count++;
+    /* Last in the fallback chain of every face of this size. */
+    for (int i = 0; emoji && i < cache_count; ++i) {
+        if (cache[i].px == px) TTF_AddFallbackFont(cache[i].font, emoji);
+    }
+    return emoji;
 }
 
 void fonts_shutdown(void)
@@ -148,9 +185,12 @@ void fonts_shutdown(void)
     for (int i = 0; i < cache_count; ++i) {
         TTF_CloseFont(cache[i].font);
     }
+    for (int i = 0; i < emoji_count; ++i) {
+        if (emoji_cache[i].font) TTF_CloseFont(emoji_cache[i].font);
+    }
+    emoji_count = 0;
     for (int i = 0; i < cache_count; ++i) {
         if (!cache[i].owns_fallbacks) continue;
-        if (cache[i].emoji) TTF_CloseFont(cache[i].emoji);
         if (cache[i].math) TTF_CloseFont(cache[i].math);
         if (cache[i].symbols) TTF_CloseFont(cache[i].symbols);
         if (cache[i].nerd) TTF_CloseFont(cache[i].nerd);

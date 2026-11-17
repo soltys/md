@@ -24,11 +24,17 @@ typedef enum FontFace {
 bool fonts_init(float warm_px);
 
 /* Main thread only. Returns a font for the face at the given pixel size,
- * with Noto Color Emoji attached as fallback. Fonts are cached forever. */
+ * with the symbol fonts attached as fallbacks (and Noto Color Emoji once
+ * fonts_get_emoji() has opened it for that size). Fonts are cached forever. */
 TTF_Font *fonts_get(FontFace face, float px);
 
-/* Noto Color Emoji at the given size (main thread only). */
+/* Noto Color Emoji at the given size (main thread only). Opened on the
+ * first call for a size, so only ask when there really is an emoji. */
 TTF_Font *fonts_get_emoji(float px);
+
+/* Any thread: starts unpacking the emoji font in the background (the
+ * loader calls this for documents that contain emoji). */
+void fonts_prefetch_emoji(void);
 
 void fonts_shutdown(void);
 

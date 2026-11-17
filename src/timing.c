@@ -8,6 +8,7 @@
 
 #ifdef _WIN32
 #include <windows.h>
+#include <psapi.h> /* K32EnumProcessModules: in kernel32, no extra library */
 #define THREAD_LOCAL __declspec(thread)
 #else
 #define THREAD_LOCAL _Thread_local
@@ -32,6 +33,13 @@ static char log_path[1024];
 #ifdef _WIN32
 static HANDLE out = INVALID_HANDLE_VALUE;
 static bool out_is_console;
+#endif
+
+#ifdef _WIN32
+/* What the process had done by the time main() ran, for the report. */
+static double pre_main_user_ms, pre_main_kernel_ms;
+static int pre_main_dll_count;
+static char pre_main_dlls[2048];
 #endif
 
 static THREAD_LOCAL const char *thread_name;
@@ -149,6 +157,26 @@ void timing_init(void)
         Uint64 w = ((Uint64)wall.dwHighDateTime << 32) | wall.dwLowDateTime;
         /* 100 ns units; split the division so the product cannot overflow */
         if (w > c) before_main = (w - c) / 10000000u * freq + (w - c) % 10000000u * freq / 10000000u;
+        /* CPU time md itself used before main(). If it is far below the
+         * wall time, the wait was outside md: antivirus scanning the
+         * image, the parent's process creation, ... (tick-based, so only
+         * accurate to about 16 ms). */
+        pre_main_user_ms = (double)(((Uint64)user.dwHighDateTime << 32) | user.dwLowDateTime) / 10000.0;
+        pre_main_kernel_ms = (double)(((Uint64)kernel.dwHighDateTime << 32) | kernel.dwLowDateTime) / 10000.0;
+    }
+    /* The DLLs Windows loaded before main(): md.exe's imports and theirs. */
+    HMODULE mods[256];
+    DWORD need = 0;
+    if (K32EnumProcessModules(GetCurrentProcess(), mods, sizeof mods, &need)) {
+        int n = (int)SDL_min(need / sizeof(HMODULE), SDL_arraysize(mods));
+        pre_main_dll_count = n - 1; /* without md.exe itself */
+        size_t len = 0;
+        for (int i = 1; i < n && len + 40 < sizeof pre_main_dlls; ++i) {
+            char name[64];
+            if (!K32GetModuleBaseNameA(GetCurrentProcess(), mods[i], name, sizeof name)) continue;
+            len += (size_t)SDL_snprintf(pre_main_dlls + len, sizeof pre_main_dlls - len, "%s%s",
+                                        len ? ", " : "", name);
+        }
     }
     base = t - SDL_min(before_main, t);
 #else
@@ -209,7 +237,7 @@ double timing_first_full_render(void)
     SDL_qsort(list, (size_t)count, sizeof(Entry), by_time);
     open_outputs();
 
-    size_t cap = (size_t)count * 160 + 1024, len = 0;
+    size_t cap = (size_t)count * 160 + 4096, len = 0;
     char *text = SDL_malloc(cap);
     if (!text) { SDL_free(list); return total; }
     len += (size_t)SDL_snprintf(text + len, cap - len,
@@ -223,6 +251,13 @@ double timing_first_full_render(void)
     if (dropped) {
         len += (size_t)SDL_snprintf(text + len, cap - len, "(%d more marks dropped)\n", dropped);
     }
+#ifdef _WIN32
+    len += (size_t)SDL_snprintf(text + len, cap - len,
+        "before main(): md used %.0f ms CPU (user %.0f, kernel %.0f; +-16 ms) of %.0f ms wall time;"
+        " %d DLLs loaded:\n  %s\n",
+        pre_main_user_ms + pre_main_kernel_ms, pre_main_user_ms, pre_main_kernel_ms,
+        count ? ms(list[0].at - base) : 0.0, pre_main_dll_count, pre_main_dlls);
+#endif
     SDL_snprintf(text + len, cap - len, "(log file: %s)\n-- later events --\n",
                  log_file ? log_path : "could not be created");
     write_out(text);

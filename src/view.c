@@ -141,7 +141,6 @@ static void tokenize(View *v, const char *text, uint32_t a, uint32_t b, const Sp
     uint16_t style = sp ? sp->style : 0;
     float px = ts->px * ((style & ST_CODE) && !ts->pre ? 0.875f : 1.0f);
     TTF_Font *font = fonts_get(styled_face(ts->face, style), px);
-    TTF_Font *emoji_font = fonts_get_emoji(px);
 
     Tok base;
     SDL_zero(base);
@@ -195,6 +194,8 @@ static void tokenize(View *v, const char *text, uint32_t a, uint32_t b, const Sp
         if (em) {
             uint32_t cp;
             utf8_decode(text + i, b - i, &cp);
+            /* Opened here, on the first real emoji, not for every run. */
+            TTF_Font *emoji_font = fonts_get_emoji(px);
             if (emoji_font && TTF_FontHasGlyph(emoji_font, cp)) {
                 t.kind = TOK_WORD;
                 t.len = (uint32_t)em;

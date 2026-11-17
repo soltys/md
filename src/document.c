@@ -1,4 +1,6 @@
 #include "document.h"
+#include "emoji.h"
+#include "fonts.h"
 #include "highlight.h"
 #include "timing.h"
 
@@ -735,6 +737,12 @@ static Document *parse(Document *doc)
     if (doc->source_len > UINT32_MAX / 4) {
         SDL_asprintf(&doc->error, "File is too large");
         return doc;
+    }
+    /* The emoji font is big and only unpacked when needed: if this page
+     * has emoji, start on it now, in parallel with parsing. */
+    if (text_has_emoji(doc->source, doc->source_len)) {
+        fonts_prefetch_emoji();
+        TIMING_MARK("text has emoji: start unpacking the emoji font");
     }
     uint32_t src_len = (uint32_t)doc->source_len;
     /* Blank out a UTF-8 BOM (keeps byte offsets stable). */

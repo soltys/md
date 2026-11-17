@@ -48,6 +48,13 @@ static const char HELP[] =
 "    --theme=THEME       light, dark or system (the default: follow Windows'\n"
 "                        light / dark app mode, also when it changes while md\n"
 "                        runs). '--theme dark' works too. The last one wins.\n"
+"    --renderer=NAME     Draw with this SDL renderer: direct3d11 (the default\n"
+"                        on Windows), direct3d12, opengl or software. The\n"
+"                        MD_RENDERER environment variable sets the same thing\n"
+"                        for every start; this option wins over it. Which one\n"
+"                        starts fastest depends on the GPU driver: 'software'\n"
+"                        loads no GPU driver at all. If NAME fails, md uses the\n"
+"                        default. '--renderer opengl' works too.\n"
 "    -h, --help, /?      Show this help and exit.\n"
 "    -V, --version       Show the version and exit.\n"
 "    --                  Treat everything after this as a file name, even if it\n"
@@ -255,6 +262,8 @@ int cli_parse(int argc, char **argv, CliOptions *out)
             else if (is(a, "-d", "--dark")) out->theme = CLI_THEME_DARK;
             else if (SDL_strncmp(a, "--theme=", 8) == 0) theme = a + 8;
             else if (is(a, "--theme", NULL)) theme = i + 1 < argc ? argv[++i] : "";
+            else if (SDL_strncmp(a, "--renderer=", 11) == 0) out->renderer = a + 11;
+            else if (is(a, "--renderer", NULL)) out->renderer = i + 1 < argc ? argv[++i] : "";
             else if (is(a, "-h", "--help")) { print(HELP, false); return 0; }
             else if (is(a, "-V", "--version")) { print(VERSION, false); return 0; }
             else if (is(a, "--", NULL)) only_files = true;

@@ -9,6 +9,7 @@ typedef struct CliOptions {
     const char *file;   /* Markdown file to open, or NULL */
     bool edit;          /* -e / --edit: open with the editor */
     int theme;          /* CLI_THEME_*: --light / --dark / --theme */
+    const char *renderer; /* --renderer=NAME, or NULL for the default */
 } CliOptions;
 
 /* Parses the command line. Returns -1 to go on and start md, or an exit

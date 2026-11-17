@@ -20,6 +20,7 @@
 #include "document.h"
 #include "editor.h"
 #include "fonts.h"
+#include "gpu_warm.h"
 #include "images.h"
 #include "nvim.h"
 #include "theme.h"
@@ -550,8 +551,25 @@ static void draw_help(SDL_Renderer *r)
     SDL_SetRenderClipRect(r, NULL);
 }
 
+static bool window_shown; /* the first frame is drawn before the window is shown */
+
 #if MD_TIMING
 static int timing_frame;
+
+static void report_first_render(void)
+{
+    /* Also say so in the window: md is a GUI program, so when it is not
+     * started from a console or a debugger the report is only in the
+     * log file. */
+    double total = timing_first_full_render();
+    if (total >= 0) {
+        char msg[sizeof app.toast];
+        SDL_snprintf(msg, sizeof msg, "First full render: %.1f ms. Log: %s", total,
+                     timing_log_path());
+        show_toast_ms(msg, 8000);
+        wake_main_thread(); /* draw the toast now, not on the next event */
+    }
+}
 #endif
 
 static void render(void)
@@ -610,19 +628,7 @@ static void render(void)
     TIMING_MARK("frame %d: present (waits for vsync)", timing_frame);
     app.dirty = false;
 #if MD_TIMING
-    if (settled) {
-        /* Also say so in the window: md is a GUI program, so when it is not
-         * started from a console or a debugger the report is only in the
-         * log file. */
-        double total = timing_first_full_render();
-        if (total >= 0) {
-            char msg[sizeof app.toast];
-            SDL_snprintf(msg, sizeof msg, "First full render: %.1f ms. Log: %s", total,
-                         timing_log_path());
-            show_toast_ms(msg, 8000);
-            wake_main_thread(); /* draw the toast now, not on the next event */
-        }
-    }
+    if (settled && window_shown) report_first_render();
 #endif
 }
 
@@ -1592,7 +1598,16 @@ int main(int argc, char **argv)
     if (edit) begin_nvim(file); /* overlaps with window creation */
     TIMING_MARK("spawn Neovim start thread (-e only)");
 
-    /* 2. Window + renderer. */
+    /* 2. Window + renderer. The renderer is --renderer, else MD_RENDERER,
+     *    else SDL's choice (Direct3D 11 on Windows). Loading the GPU driver
+     *    is the slowest part of starting, so for Direct3D 11 a helper thread
+     *    starts it now, while SDL_Init and the window are being set up. */
+    const char *renderer_name = opts.renderer;
+    if (!renderer_name || !*renderer_name) renderer_name = SDL_getenv("MD_RENDERER");
+    if (renderer_name && !*renderer_name) renderer_name = NULL;
+    if (!renderer_name || SDL_strncasecmp(renderer_name, "direct3d11", 10) == 0) gpu_warm_start();
+    TIMING_MARK("spawn GPU warm-up thread");
+
     SDL_SetHint(SDL_HINT_RENDER_VSYNC, "1");
     if (!SDL_Init(SDL_INIT_VIDEO)) {
         SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, APP_NAME, SDL_GetError(), NULL);
@@ -1612,30 +1627,52 @@ int main(int argc, char **argv)
     app.vertical = true;
     app.focus = PANE_VIEWER;
 
-    if (!SDL_CreateWindowAndRenderer(APP_NAME, 1280, 820,
-                                     SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY |
-                                     SDL_WINDOW_HIDDEN,
-                                     &app.window, &app.renderer)) {
+    app.window = SDL_CreateWindow(APP_NAME, 1280, 820,
+                                  SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY |
+                                  SDL_WINDOW_HIDDEN);
+    if (!app.window) {
         SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, APP_NAME, SDL_GetError(), NULL);
         return 1;
     }
-    TIMING_MARK("create window + renderer (%s)", SDL_GetRendererName(app.renderer));
+    TIMING_MARK("create window (hidden)");
+    app.renderer = SDL_CreateRenderer(app.window, renderer_name);
+    if (!app.renderer && renderer_name) {
+        TIMING_MARK("renderer '%s' failed, using the default", renderer_name);
+        app.renderer = SDL_CreateRenderer(app.window, NULL);
+    }
+    gpu_warm_finish(); /* the warm-up device is no longer needed */
+    if (!app.renderer) {
+        SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, APP_NAME, SDL_GetError(), NULL);
+        return 1;
+    }
+    TIMING_MARK("create renderer (%s)", SDL_GetRendererName(app.renderer));
 
-    /* 3. First frame: just the background colours, then show the window.
-     *    Presenting before showing avoids a white/black flash. */
     const Theme *theme = app.dark ? &THEME_DARK : &THEME_LIGHT;
     app.view.theme = *theme;
-    if (edit) { /* paint the split right away; nvim fills it in later */
-        app.layout = LAYOUT_SPLIT;
-        app.nvim_ok = true;
+
+    /* 3. If the fonts are not ready yet (or Neovim is coming, -e), show the
+     *    window with an empty first frame (just the background colours) and
+     *    fill it in afterwards. Usually the fonts are long done by now: then
+     *    the first frame drawn is the real page and the window is shown
+     *    with it, saving one frame. Presenting before showing avoids a
+     *    white/black flash either way. */
+    const bool fonts_ready = SDL_GetThreadState(app.font_thread) == SDL_THREAD_COMPLETE;
+    if (!fonts_ready || edit) {
+        if (edit) { /* paint the split right away; nvim fills it in later */
+            app.layout = LAYOUT_SPLIT;
+            app.nvim_ok = true;
+        }
+        relayout();
+        TIMING_MARK("lay out panes (empty frame)");
+        render();
+        SDL_ShowWindow(app.window);
+        window_shown = true;
+        TIMING_MARK("show window (empty frame)");
+        app.nvim_ok = false;
+        app.layout = LAYOUT_VIEWER;
+    } else {
+        TIMING_MARK("fonts ready: skip the empty frame");
     }
-    relayout();
-    TIMING_MARK("lay out panes (empty frame)");
-    render();
-    SDL_ShowWindow(app.window);
-    TIMING_MARK("show window");
-    app.nvim_ok = false;
-    app.layout = LAYOUT_VIEWER;
 
     /* 4. Text needs the fonts; by now they are usually ready. */
     int font_status = -1;
@@ -1657,6 +1694,17 @@ int main(int argc, char **argv)
     TIMING_MARK("lay out panes");
     take_loaded_document(); /* in case the loader already finished */
     render();
+    if (!window_shown) {
+        SDL_ShowWindow(app.window);
+        window_shown = true;
+        TIMING_MARK("show window");
+#if MD_TIMING
+        if (app.fonts_ok && SDL_GetAtomicInt(&app.loads_pending) == 0 &&
+            SDL_GetAtomicPointer(&app.loaded_doc) == NULL) {
+            report_first_render(); /* that frame was the full page */
+        }
+#endif
+    }
 
     /* 5. Event loop: sleep until something happens. */
     bool running = true;
