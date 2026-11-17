@@ -141,3 +141,15 @@ if(MSVC)
 else()
     target_compile_options(md_zstd PRIVATE -w)
 endif()
+
+# The full library (compressor too) for build-time tools only, see
+# tools/ts_pack.c. Never linked into md.exe.
+file(GLOB _zl_all "${_zl}/common/*.c" "${_zl}/compress/*.c" "${_zl}/decompress/*.c")
+add_library(md_zstd_tools STATIC ${_zl_all})
+target_include_directories(md_zstd_tools SYSTEM PUBLIC "${_zl}")
+target_compile_definitions(md_zstd_tools PRIVATE ZSTD_DISABLE_ASM=1 ZSTD_LEGACY_SUPPORT=0)
+if(MSVC)
+    target_compile_options(md_zstd_tools PRIVATE /W0)
+else()
+    target_compile_options(md_zstd_tools PRIVATE -w)
+endif()

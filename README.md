@@ -243,16 +243,21 @@ see its README.
    start of a new build is the slowest thing of all. Each font is unpacked
    once, on a worker thread where possible: the body and fallback fonts on
    the font thread, the other faces right after it.
-5. Noto Color Emoji (25 MB) is unpacked only for documents that contain
+5. The syntax highlighting grammars' parse tables (11 MB, mostly zeros)
+   are stored zstd-compressed too (0.4 MB) and unpacked on the loader thread
+   the first time a code block in that language is highlighted. A build-time
+   helper (`tools/ts_pack.c`) packs them; `-DMD_PACK_GRAMMARS=OFF` links the
+   grammars as they are.
+6. Noto Color Emoji (25 MB) is unpacked only for documents that contain
    emoji (the loader starts it as soon as it has read the file) and opened
    only for the text sizes that actually show an emoji.
-6. Only the visible part of the document is laid out before the first frame;
+7. Only the visible part of the document is laid out before the first frame;
    the rest is laid out in small slices while the app is idle. Text objects
    are created the first time a line is drawn.
-7. Images and syntax highlighting queries load lazily on worker threads.
-8. DLLs that are not needed for the first frame (shell32, ole32, setupapi,
+8. Images and syntax highlighting queries load lazily on worker threads.
+9. DLLs that are not needed for the first frame (shell32, ole32, setupapi,
    ...) are delay-loaded, so Windows does not load them before `main()`.
-9. The window is DPI-aware through the manifest, so it opens at the right size.
+10. The window is DPI-aware through the manifest, so it opens at the right size.
 
 Which renderer starts fastest depends on the GPU driver. md uses SDL's
 default (Direct3D 11 on Windows); `--renderer=NAME` or the `MD_RENDERER`
@@ -307,6 +312,7 @@ installing.
 | `src/document.c` | tree-sitter block + inline parsing into blocks and styled spans |
 | `src/view.c` | Rich-text layout engine and preview drawing |
 | `src/highlight.c`, `src/regex.c` | Code block highlighting with tree-sitter queries |
+| `src/grammar_pack.c`, `tools/ts_pack.c` | Compressed grammar parse tables: unpacking at run time, packing at build time |
 | `src/nvim.c`, `src/msgpack.c` | Neovim process and msgpack-RPC UI client |
 | `src/editor.c` | Draws Neovim's grid |
 | `src/fonts.c`, `src/assets.c` | Embedded fonts (zstd-compressed RCDATA, unpacked on first use) and font cache |

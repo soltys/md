@@ -66,6 +66,8 @@ add_executable(md WIN32
     src/emoji.h
     src/images.c
     src/images.h
+    src/grammar_pack.c
+    src/grammar_pack.h
     src/highlight.c
     src/highlight.h
     src/regex.c

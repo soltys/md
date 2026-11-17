@@ -149,6 +149,9 @@ static TSQuery *get_query(Lang *l, uint8_t **classes)
         *classes = SDL_GetAtomicPointer(&l->classes);
         return q;
     }
+    /* NULL only if the grammar's packed parse tables could not be unpacked. */
+    const TSLanguage *language = l->language();
+    if (!language) return NULL;
     size_t base_len = l->base_query ? *l->base_query_len : 0;
     size_t len = *l->query_len;
     char *src = SDL_malloc(base_len + len + 2);
@@ -160,9 +163,9 @@ static TSQuery *get_query(Lang *l, uint8_t **classes)
     uint32_t err_off;
     TSQueryError err;
     TIMING_MARK("(highlight setup)");
-    q = ts_query_new(l->language(), src, (uint32_t)(base_len + 1 + len), &err_off, &err);
+    q = ts_query_new(language, src, (uint32_t)(base_len + 1 + len), &err_off, &err);
     if (!q && base_len) { /* base query not compatible: use the language's own */
-        q = ts_query_new(l->language(), (const char *)l->query, (uint32_t)len, &err_off, &err);
+        q = ts_query_new(language, (const char *)l->query, (uint32_t)len, &err_off, &err);
     }
     SDL_free(src);
     TIMING_MARK("compile highlight query [%s]", l->aliases);
