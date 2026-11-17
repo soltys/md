@@ -5,6 +5,7 @@
  * otherwise to the console md was started from, and when there is none
  * (Explorer, a shortcut) into a message box. */
 #include "cli.h"
+#include "timing.h"
 
 #include <SDL3/SDL.h>
 #include <SDL3_image/SDL_image.h>
@@ -187,7 +188,13 @@ static const char VERSION[] =
 "SDL " MD_VER3(SDL_MAJOR_VERSION, SDL_MINOR_VERSION, SDL_MICRO_VERSION)
 ", SDL_ttf " MD_VER3(SDL_TTF_MAJOR_VERSION, SDL_TTF_MINOR_VERSION, SDL_TTF_MICRO_VERSION)
 ", SDL_image " MD_VER3(SDL_IMAGE_MAJOR_VERSION, SDL_IMAGE_MINOR_VERSION, SDL_IMAGE_MICRO_VERSION)
-", tree-sitter\n";
+", tree-sitter\n"
+#if MD_TIMING
+"startup timing log: on\n"
+#else
+"startup timing log: off\n"
+#endif
+;
 
 static void print(const char *text, bool error)
 {

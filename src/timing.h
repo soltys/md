@@ -8,7 +8,7 @@
  * MD_TIMING is set by CMake: 1 in Debug builds, and in other configurations
  * only with -DMD_TIMING_LOG=ON. With MD_TIMING 0 every macro below expands to
  * ((void)0) and drops its arguments unevaluated, so a normal Release build
- * contains no timing code at all.
+ * contains no timing code at all. `md --version` says whether it is on.
  *
  * Steps are timed per thread: a mark ends the step that began at the
  * previous mark on the same thread. Marks are kept in memory (no I/O while
@@ -27,7 +27,10 @@ void timing_init(void);
 void timing_thread(const char *name);
 void timing_mark(const char *fmt, ...);
 void timing_event(const char *fmt, ...);
-void timing_first_full_render(void);
+/* Prints the report; returns ms from process creation to the first full
+ * render, or -1 if the report was printed already. */
+double timing_first_full_render(void);
+const char *timing_log_path(void); /* valid after the report */
 
 #define TIMING_INIT()               timing_init()
 #define TIMING_THREAD(name)         timing_thread(name)

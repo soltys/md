@@ -28,6 +28,7 @@ static SDL_Mutex *lock;
 static Uint64 base, freq;      /* counter value at process creation; ticks per second */
 static SDL_AtomicInt reported;
 static FILE *log_file;
+static char log_path[1024];
 #ifdef _WIN32
 static HANDLE out = INVALID_HANDLE_VALUE;
 static bool out_is_console;
@@ -53,11 +54,13 @@ static double ms(Uint64 ticks) { return (double)ticks * 1000.0 / (double)freq; }
 
 static void open_outputs(void)
 {
-    char path[1024] = "md-timing.log";
+    char *path = log_path;
+    const size_t path_size = sizeof log_path;
+    SDL_strlcpy(path, "md-timing.log", path_size);
 #ifdef _WIN32
     char tmp[MAX_PATH + 1];
     DWORD n = GetTempPathA(sizeof tmp, tmp);
-    if (n > 0 && n < sizeof tmp) SDL_snprintf(path, sizeof path, "%smd-timing.log", tmp);
+    if (n > 0 && n < sizeof tmp) SDL_snprintf(path, path_size, "%smd-timing.log", tmp);
 
     /* stderr redirected to a file or pipe (md 2> log.txt), otherwise the
      * console md was started from, if any. md is a GUI program, so the
@@ -67,12 +70,13 @@ static void open_outputs(void)
     if (type == FILE_TYPE_DISK || type == FILE_TYPE_PIPE) {
         out = h;
     } else if (AttachConsole(ATTACH_PARENT_PROCESS)) {
-        out = CreateFileW(L"CONOUT$", GENERIC_WRITE, FILE_SHARE_WRITE, NULL, OPEN_EXISTING, 0, NULL);
+        out = CreateFileW(L"CONOUT$", GENERIC_READ | GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE,
+                          NULL, OPEN_EXISTING, 0, NULL);
         out_is_console = out != INVALID_HANDLE_VALUE;
     }
 #else
     const char *tmp = SDL_getenv("TMPDIR");
-    SDL_snprintf(path, sizeof path, "%s/md-timing.log", tmp && *tmp ? tmp : "/tmp");
+    SDL_snprintf(path, path_size, "%s/md-timing.log", tmp && *tmp ? tmp : "/tmp");
 #endif
     log_file = fopen(path, "w");
 }
@@ -187,10 +191,13 @@ static int SDLCALL by_time(const void *a, const void *b)
     return x->at < y->at ? -1 : x->at > y->at;
 }
 
-void timing_first_full_render(void)
+const char *timing_log_path(void) { return log_path; }
+
+double timing_first_full_render(void)
 {
-    if (SDL_GetAtomicInt(&reported)) return;
+    if (SDL_GetAtomicInt(&reported)) return -1.0;
     timing_mark("== first full render ==");
+    const double total = ms(thread_last - base);
     SDL_LockMutex(lock);
     SDL_SetAtomicInt(&reported, 1);
     Entry *list = SDL_malloc(sizeof(Entry) * (size_t)(entry_count ? entry_count : 1));
@@ -204,7 +211,7 @@ void timing_first_full_render(void)
 
     size_t cap = (size_t)count * 160 + 1024, len = 0;
     char *text = SDL_malloc(cap);
-    if (!text) { SDL_free(list); return; }
+    if (!text) { SDL_free(list); return total; }
     len += (size_t)SDL_snprintf(text + len, cap - len,
         "\nmd startup timing (ms since process creation; step = time since the "
         "previous mark on the same thread)\n"
@@ -216,10 +223,12 @@ void timing_first_full_render(void)
     if (dropped) {
         len += (size_t)SDL_snprintf(text + len, cap - len, "(%d more marks dropped)\n", dropped);
     }
-    SDL_snprintf(text + len, cap - len, "-- later events --\n");
+    SDL_snprintf(text + len, cap - len, "(log file: %s)\n-- later events --\n",
+                 log_file ? log_path : "could not be created");
     write_out(text);
     SDL_free(text);
     SDL_free(list);
+    return total;
 }
 
 #else

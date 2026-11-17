@@ -610,7 +610,19 @@ static void render(void)
     TIMING_MARK("frame %d: present (waits for vsync)", timing_frame);
     app.dirty = false;
 #if MD_TIMING
-    if (settled) TIMING_FIRST_FULL_RENDER();
+    if (settled) {
+        /* Also say so in the window: md is a GUI program, so when it is not
+         * started from a console or a debugger the report is only in the
+         * log file. */
+        double total = timing_first_full_render();
+        if (total >= 0) {
+            char msg[sizeof app.toast];
+            SDL_snprintf(msg, sizeof msg, "First full render: %.1f ms. Log: %s", total,
+                         timing_log_path());
+            show_toast_ms(msg, 8000);
+            wake_main_thread(); /* draw the toast now, not on the next event */
+        }
+    }
 #endif
 }
 

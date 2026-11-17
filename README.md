@@ -270,7 +270,12 @@ to the debugger output (Visual Studio, DebugView), and to the console md was
 started from, or to stderr when it is redirected (`md README.md 2> t.txt`).
 Later one-off events (images decoded, background layout of the rest of the
 document finished, Neovim's first redraw) are appended as they happen.
-Turn the option off again (`-DMD_TIMING_LOG=OFF`) before installing.
+A toast in the window also shows the time to the first full render and the
+log file's path, so the result is visible even when md is started from
+Explorer. `md --version` prints `startup timing log: on` or `off`, to check
+which kind of build you are running (an installed `mdv.exe` on PATH may be
+an older build). Turn the option off again (`-DMD_TIMING_LOG=OFF`) before
+installing.
 
 ## ![](art/png/folder@3x.png) Source layout
 

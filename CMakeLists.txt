@@ -96,6 +96,11 @@ target_compile_definitions(md PRIVATE MD_VERSION="${PROJECT_VERSION}")
 option(MD_TIMING_LOG "Log startup timing in Release builds too (Debug always logs)" OFF)
 target_compile_definitions(md PRIVATE
     $<IF:$<OR:$<CONFIG:Debug>,$<BOOL:${MD_TIMING_LOG}>>,MD_TIMING=1,MD_TIMING=0>)
+if(MD_TIMING_LOG)
+    message(STATUS "md startup timing log: ON in every configuration (MD_TIMING_LOG=ON)")
+else()
+    message(STATUS "md startup timing log: Debug only (Release: -DMD_TIMING_LOG=ON)")
+endif()
 
 target_link_libraries(md PRIVATE
     SDL3::SDL3-static
