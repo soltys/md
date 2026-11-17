@@ -47,8 +47,6 @@ add_executable(md WIN32
     src/asset_ids.h
     src/fonts.c
     src/fonts.h
-    src/gpu_warm.c
-    src/gpu_warm.h
     src/document.c
     src/document.h
     src/view.c

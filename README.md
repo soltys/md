@@ -229,9 +229,7 @@ see its README.
 
 1. Before `SDL_Init`, worker threads start: one initialises FreeType/HarfBuzz
    and opens the body font, one reads and parses the file, one (`-e` only)
-   writes the Neovim config and spawns `nvim --embed`, and one creates a
-   throwaway Direct3D 11 device so the GPU driver loads while the main thread
-   runs `SDL_Init` and creates the window (`src/gpu_warm.c`).
+   writes the Neovim config and spawns `nvim --embed`.
 2. The main thread creates the window hidden, then the renderer. When the
    fonts are ready by then (the usual case), the first frame drawn is the
    real page and the window is shown with it; otherwise it presents one frame
@@ -312,7 +310,6 @@ installing.
 | `src/nvim.c`, `src/msgpack.c` | Neovim process and msgpack-RPC UI client |
 | `src/editor.c` | Draws Neovim's grid |
 | `src/fonts.c`, `src/assets.c` | Embedded fonts (zstd-compressed RCDATA, unpacked on first use) and font cache |
-| `src/gpu_warm.c` | Loads the Direct3D 11 driver on a helper thread during startup |
 | `src/emoji.c`, `src/images.c` | Emoji clustering, async image loading |
 | `art/` | PICO-8 sprite sheets and the PNGs generated from them by [pixelart](https://github.com/soltys/pixelart) |
 

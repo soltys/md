@@ -20,7 +20,6 @@
 #include "document.h"
 #include "editor.h"
 #include "fonts.h"
-#include "gpu_warm.h"
 #include "images.h"
 #include "nvim.h"
 #include "theme.h"
@@ -1599,14 +1598,10 @@ int main(int argc, char **argv)
     TIMING_MARK("spawn Neovim start thread (-e only)");
 
     /* 2. Window + renderer. The renderer is --renderer, else MD_RENDERER,
-     *    else SDL's choice (Direct3D 11 on Windows). Loading the GPU driver
-     *    is the slowest part of starting, so for Direct3D 11 a helper thread
-     *    starts it now, while SDL_Init and the window are being set up. */
+     *    else SDL's choice (Direct3D 11 on Windows). */
     const char *renderer_name = opts.renderer;
     if (!renderer_name || !*renderer_name) renderer_name = SDL_getenv("MD_RENDERER");
     if (renderer_name && !*renderer_name) renderer_name = NULL;
-    if (!renderer_name || SDL_strncasecmp(renderer_name, "direct3d11", 10) == 0) gpu_warm_start();
-    TIMING_MARK("spawn GPU warm-up thread");
 
     SDL_SetHint(SDL_HINT_RENDER_VSYNC, "1");
     if (!SDL_Init(SDL_INIT_VIDEO)) {
@@ -1640,7 +1635,6 @@ int main(int argc, char **argv)
         TIMING_MARK("renderer '%s' failed, using the default", renderer_name);
         app.renderer = SDL_CreateRenderer(app.window, NULL);
     }
-    gpu_warm_finish(); /* the warm-up device is no longer needed */
     if (!app.renderer) {
         SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, APP_NAME, SDL_GetError(), NULL);
         return 1;
