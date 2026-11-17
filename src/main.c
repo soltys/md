@@ -360,6 +360,8 @@ static void draw_search_bar(SDL_Renderer *r)
     }
 }
 
+static void viewer_hover_at_mouse(void);
+
 static void draw_toast(SDL_Renderer *r)
 {
     if (!app.toast[0] || !app.fonts_ok) return;
@@ -426,6 +428,7 @@ static const char *const HELP[][2] = {
     {"Ctrl+C", "Copy as rich text"},
     {"Ctrl+Shift+C", "Copy as plain text"},
     {"Click a link", "Open it (.md files open in md)"},
+    {"Code block button", "Copy the code"},
 };
 
 typedef struct HelpCol {
@@ -562,6 +565,11 @@ static void render(void)
             if (doc && doc->error) {
                 view_draw_message(&app.view, r, "Could not open the file", doc->error);
             } else if (doc && doc->block_count > 0) {
+                /* Scrolling (keys, wheel, the editor) moves content under a
+                 * still mouse: keep the copy button on the right block. */
+                if (SDL_GetMouseFocus() == app.window && !app.selecting) viewer_hover_at_mouse();
+                /* The check mark on a copied block goes with the toast. */
+                if (!app.toast[0] || SDL_GetTicks() >= app.toast_until) view_set_copied(&app.view, -1);
                 view_draw(&app.view, r);
             } else if (!editor_visible() && SDL_GetAtomicInt(&app.loads_pending) == 0) {
                 view_draw_message(&app.view, r, "Drop a Markdown file here",
@@ -915,6 +923,25 @@ static void copy_selection(bool rich)
     SDL_free(text);
 }
 
+/* The copy button of a code block: its raw code as plain text. */
+static void copy_code_block(int item)
+{
+    char *text = view_code_text(&app.view, item);
+    if (!text) return;
+    size_t lines = text[0] ? 1 : 0;
+    for (const char *p = text; *p; ++p) lines += *p == '\n';
+    char msg[128];
+    if (SDL_SetClipboardText(text)) {
+        SDL_snprintf(msg, sizeof msg, "Copied code block (%zu line%s)", lines, lines == 1 ? "" : "s");
+        view_set_copied(&app.view, item);
+    } else {
+        SDL_snprintf(msg, sizeof msg, "Could not copy: %s", SDL_GetError());
+    }
+    show_toast(msg);
+    SDL_free(text);
+    app.dirty = true;
+}
+
 /* App shortcuts use Ctrl+Shift so they never collide with AltGr letters
  * (AltGr = Ctrl+Alt on Windows) or with Neovim's own Ctrl mappings. */
 static bool app_shortcut(const SDL_KeyboardEvent *k)
@@ -1015,6 +1042,27 @@ static void set_hand_cursor(bool hand)
     }
     SDL_SetCursor(hand ? pointer : arrow);
     current = hand;
+}
+
+/* Mouse at window pixel (x, y): the copy button of the code block under it
+ * and the hand cursor over links and that button. */
+static void viewer_hover(float x, float y)
+{
+    bool inside = viewer_visible() && !app.show_help && in_rect(&app.viewer_rect, x, y);
+    float vx = x - app.viewer_rect.x, vy = y - app.viewer_rect.y;
+    if (view_hover(&app.view, inside ? vx : -1, vy)) app.dirty = true;
+    const char *url;
+    size_t len;
+    set_hand_cursor(inside && (app.view.hover_button || view_link_at(&app.view, vx, vy, &url, &len)));
+}
+
+/* After scrolling, the content under a still mouse has changed. */
+static void viewer_hover_at_mouse(void)
+{
+    float x, y;
+    SDL_GetMouseState(&x, &y);
+    to_pixels(&x, &y);
+    viewer_hover(x, y);
 }
 
 /* Web links go to the browser; links to local Markdown files open in md
@@ -1357,7 +1405,11 @@ static bool handle_event(const SDL_Event *e)
             }
             break;
         }
-        if (down && e->button.button == SDL_BUTTON_LEFT && viewer_visible() &&
+        int copy_item = down && e->button.button == SDL_BUTTON_LEFT && viewer_visible() &&
+                        in_rect(&app.viewer_rect, x, y) ? view_copy_button_at(&app.view, vx, vy) : -1;
+        if (copy_item >= 0) {
+            copy_code_block(copy_item);
+        } else if (down && e->button.button == SDL_BUTTON_LEFT && viewer_visible() &&
             in_rect(&app.viewer_rect, x, y)) {
             if ((SDL_GetModState() & SDL_KMOD_SHIFT) && app.view.has_sel) {
                 view_select_extend(&app.view, vx, vy);
@@ -1391,11 +1443,9 @@ static bool handle_event(const SDL_Event *e)
         if (viewer_visible()) {
             float x = e->motion.x, y = e->motion.y;
             to_pixels(&x, &y);
-            const char *url;
-            size_t len;
-            bool link = in_rect(&app.viewer_rect, x, y) &&
-                        view_link_at(&app.view, x - app.viewer_rect.x, y - app.viewer_rect.y, &url, &len);
-            set_hand_cursor(link);
+            /* No button while dragging a selection over a block. */
+            if (app.selecting && app.sel_dragged) x = -1;
+            viewer_hover(x, y);
         }
         if (app.selecting && (e->motion.state & SDL_BUTTON_LMASK)) {
             float x = e->motion.x, y = e->motion.y;
@@ -1431,6 +1481,9 @@ static bool handle_event(const SDL_Event *e)
         break;
     case SDL_EVENT_WINDOW_EXPOSED:
         app.dirty = true;
+        break;
+    case SDL_EVENT_WINDOW_MOUSE_LEAVE:
+        if (view_hover(&app.view, -1, 0)) app.dirty = true;
         break;
     case SDL_EVENT_SYSTEM_THEME_CHANGED: {
         if (!app.theme_forced) set_dark(SDL_GetSystemTheme() == SDL_SYSTEM_THEME_DARK);

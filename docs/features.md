@@ -40,6 +40,7 @@ follows as you type.
 | `Ctrl+A` | Select all text in the preview |
 | `Ctrl+C` | Copy the selection as rich text: pasting into Word, Outlook or a browser keeps headings, lists, links, tables and code colours |
 | `Ctrl+Shift+C` | Copy the selection as plain text |
+| Copy button on a code block | Hover a code block and click the button in its top-right corner to copy its code as plain text (no fences, no language name); a check mark and a toast confirm it |
 | Mouse drag | Select text in the preview; Shift+click extends it |
 | `PgUp` / `PgDn` / `Space` / `Home` / `End` | Scroll the preview (when it has focus); the editor follows |
 | `j` / `k`, `Ctrl+d` / `Ctrl+u`, `Ctrl+f` / `Ctrl+b`, `gg` / `G` | Vim-style scrolling in the preview; counts work (`5j`, `42G` jumps to source line 42) |
@@ -159,7 +160,8 @@ Emoji use Noto Color Emoji, in the preview and in the editor:
 ## Code
 
 Inline `code` and fenced blocks with syntax highlighting for C, C++, C#,
-Python, JavaScript, JSON, Bash, Rust, Lua and YAML:
+Python, JavaScript, JSON, Bash, Rust, Lua and YAML. Move the mouse over a
+block and click the button in its top-right corner to copy its code:
 
 ```c
 #include <stdio.h>

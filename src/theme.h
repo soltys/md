@@ -16,6 +16,9 @@ typedef struct Theme {
     SDL_Color block_bg;       /* fenced / indented code blocks */
     SDL_Color block_text;
     SDL_Color block_label;    /* the language name above a block */
+    SDL_Color block_button;   /* copy button on code blocks */
+    SDL_Color block_button_hover;
+    SDL_Color block_ok;       /* the check mark after copying */
     SDL_Color quote_bar;
     SDL_Color accent;
     SDL_Color syntax[HL_COUNT];
@@ -41,6 +44,8 @@ typedef struct Theme {
 #define LATTE_TEXT 0x4C4F69
 #define LATTE_OVERLAY2 0x7C7F93
 #define LATTE_OVERLAY1 0x8C8FA1
+#define LATTE_SURFACE1 0xBCC0CC
+#define LATTE_SURFACE0 0xCCD0DA
 #define LATTE_BASE 0xEFF1F5
 #define LATTE_MANTLE 0xE6E9EF
 
@@ -60,6 +65,8 @@ typedef struct Theme {
 #define MOCHA_TEXT 0xCDD6F4
 #define MOCHA_OVERLAY2 0x9399B2
 #define MOCHA_OVERLAY1 0x7F849C
+#define MOCHA_SURFACE1 0x45475A
+#define MOCHA_SURFACE0 0x313244
 #define MOCHA_BASE 0x1E1E2E
 #define MOCHA_MANTLE 0x181825
 
@@ -67,6 +74,9 @@ typedef struct Theme {
     .block_bg    = CTP(F##_BASE), \
     .block_text  = CTP(F##_TEXT), \
     .block_label = CTP(F##_OVERLAY1), \
+    .block_button = CTP(F##_SURFACE0), \
+    .block_button_hover = CTP(F##_SURFACE1), \
+    .block_ok    = CTP(F##_GREEN), \
     .syntax = { \
         [HL_KEYWORD]          = CTP(F##_MAUVE), \
         [HL_STRING]           = CTP(F##_GREEN), \

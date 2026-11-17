@@ -753,6 +753,7 @@ void view_init(View *v, TTF_TextEngine *engine, const Theme *theme)
     v->engine = engine;
     v->theme = *theme;
     v->scale = 1.0f;
+    v->hover_code = v->copied_item = -1;
 }
 
 void view_destroy(View *v)
@@ -766,6 +767,9 @@ void view_destroy(View *v)
     document_free(v->doc);
     if (v->msg_title) TTF_DestroyText(v->msg_title);
     if (v->msg_body) TTF_DestroyText(v->msg_body);
+    if (v->icon_copy) TTF_DestroyText(v->icon_copy);
+    if (v->icon_check) TTF_DestroyText(v->icon_check);
+    v->icon_copy = v->icon_check = NULL;
     v->doc = NULL;
 }
 
@@ -784,6 +788,16 @@ void view_set_document(View *v, Document *doc, bool keep_scroll)
     v->scroll = 0;
     v->next_y = MARGIN * v->scale;
     v->content_height = v->next_y;
+    /* Live preview keeps the button on the same block while it is still
+     * a code block; otherwise the next mouse move finds it again. */
+    if (!keep_scroll || !doc || doc->error) v->hover_code = v->copied_item = -1;
+    if (doc && !doc->error) {
+        if (v->hover_code >= doc->block_count || (v->hover_code >= 0 && doc->blocks[v->hover_code].kind != BLOCK_CODE))
+            v->hover_code = -1;
+        if (v->copied_item >= doc->block_count || (v->copied_item >= 0 && doc->blocks[v->copied_item].kind != BLOCK_CODE))
+            v->copied_item = -1;
+    }
+    if (v->hover_code < 0) v->hover_button = false;
     if (!doc || doc->error) { SDL_free(old_h); return; }
 
     v->items = SDL_calloc((size_t)(doc->block_count ? doc->block_count : 1), sizeof(ViewItem));
@@ -1045,6 +1059,41 @@ static void draw_table(View *v, SDL_Renderer *r, ViewItem *it, float dy)
     }
 }
 
+/* The copy button in the top-right corner of a code block, in document
+ * coordinates. */
+static SDL_FRect copy_button_rect(const View *v, const ViewItem *it)
+{
+    const float s = v->scale;
+    const float size = SDL_roundf(28 * s), margin = SDL_roundf(6 * s);
+    const float right = it->x + it->w + CODE_PAD * s;
+    return (SDL_FRect){SDL_roundf(right - margin - size), SDL_roundf(it->box_y + margin), size, size};
+}
+
+static void draw_copy_button(View *v, SDL_Renderer *r, const ViewItem *it, int idx, float dy)
+{
+    const Theme *th = &v->theme;
+    SDL_FRect bt = copy_button_rect(v, it);
+    bt.y += dy;
+    const bool done = idx == v->copied_item;
+    const bool hot = idx == v->hover_code && v->hover_button;
+    set_color(r, hot ? th->block_button_hover : th->block_button);
+    SDL_RenderFillRect(r, &bt);
+
+    /* Nerd Font codicons: copy (U+EBCC) and check (U+EAB2). */
+    TTF_Font *font = fonts_get(FONT_MONO, SDL_roundf(18 * v->scale));
+    if (!font) return;
+    TTF_Text **slot = done ? &v->icon_check : &v->icon_copy;
+    if (!*slot) *slot = TTF_CreateText(v->engine, font, done ? "\xEE\xAA\xB2" : "\xEE\xAF\x8C", 0);
+    else if (TTF_GetTextFont(*slot) != font) TTF_SetTextFont(*slot, font);
+    if (!*slot) return;
+    SDL_Color c = done ? th->block_ok : hot ? th->block_text : th->block_label;
+    TTF_SetTextColor(*slot, c.r, c.g, c.b, 0xFF);
+    int tw = 0, tht = 0;
+    TTF_GetTextSize(*slot, &tw, &tht);
+    TTF_DrawRendererText(*slot, SDL_roundf(bt.x + (bt.w - (float)tw) * 0.5f),
+                         SDL_roundf(bt.y + (bt.h - (float)tht) * 0.5f));
+}
+
 void view_draw(View *v, SDL_Renderer *r)
 {
     const Theme *th = &v->theme;
@@ -1102,6 +1151,9 @@ void view_draw(View *v, SDL_Renderer *r)
                 c.a = 0x70;
                 set_color(r, c);
                 SDL_RenderFillRect(r, &bar);
+            }
+            if (b->kind == BLOCK_CODE && (i == v->hover_code || i == v->copied_item)) {
+                draw_copy_button(v, r, it, i, dy);
             }
             continue;
         }
@@ -1172,7 +1224,9 @@ SDL_Surface *view_render_surface(View *v, SDL_Renderer *r, const char **error)
     SDL_GetRenderViewport(r, &old_vp);
     const float old_scroll = v->scroll, old_height = v->height;
     const bool old_sel = v->has_sel;
+    const int old_hover = v->hover_code, old_copied = v->copied_item;
     v->has_sel = false; /* no selection highlight in the picture */
+    v->hover_code = v->copied_item = -1; /* nor copy buttons */
 
     SDL_SetRenderTarget(r, tex);
     SDL_SetRenderViewport(r, NULL);
@@ -1194,12 +1248,62 @@ SDL_Surface *view_render_surface(View *v, SDL_Renderer *r, const char **error)
     v->scroll = old_scroll;
     v->height = old_height;
     v->has_sel = old_sel;
+    v->hover_code = old_hover;
+    v->copied_item = old_copied;
     SDL_DestroyTexture(tex);
     if (*error) {
         SDL_DestroySurface(out);
         return NULL;
     }
     return out;
+}
+
+/* The laid-out code block at viewport position (x, y), -1 if none. */
+static int code_block_at(View *v, float x, float y)
+{
+    if (!v->doc || v->doc->error || x < 0) return -1;
+    const float dy = y + v->scroll, pad = CODE_PAD * v->scale;
+    for (int i = 0; i < v->laid; ++i) {
+        const ViewItem *it = &v->items[i];
+        if (dy < item_top(it)) break;
+        if (it->block->kind != BLOCK_CODE) continue;
+        if (dy < it->box_y || dy >= it->box_y + it->box_h) continue;
+        if (x < it->x - pad || x >= it->x + it->w + pad) return -1;
+        return i;
+    }
+    return -1;
+}
+
+int view_copy_button_at(View *v, float x, float y)
+{
+    int i = code_block_at(v, x, y);
+    if (i < 0) return -1;
+    SDL_FRect bt = copy_button_rect(v, &v->items[i]);
+    const float dy = y + v->scroll;
+    return x >= bt.x && x < bt.x + bt.w && dy >= bt.y && dy < bt.y + bt.h ? i : -1;
+}
+
+bool view_hover(View *v, float x, float y)
+{
+    int i = code_block_at(v, x, y);
+    bool button = i >= 0 && view_copy_button_at(v, x, y) == i;
+    bool changed = i != v->hover_code || button != v->hover_button;
+    v->hover_code = i;
+    v->hover_button = button;
+    return changed;
+}
+
+char *view_code_text(View *v, int item)
+{
+    if (!v->doc || item < 0 || item >= v->item_count) return NULL;
+    const Block *b = v->items[item].block;
+    if (b->kind != BLOCK_CODE) return NULL;
+    return SDL_strndup(v->doc->strings + b->text, b->text_len);
+}
+
+void view_set_copied(View *v, int item)
+{
+    v->copied_item = item;
 }
 
 static bool para_link_at(View *v, const Para *p, float ox, float oy, float x, float y,

@@ -78,6 +78,12 @@ typedef struct View {
 
     bool has_sel;
     SelPos sel_anchor, sel_focus;
+
+    /* Copy button of code blocks: shown on the block under the mouse. */
+    int hover_code;           /* item index, -1 = none */
+    bool hover_button;        /* the mouse is on the button itself */
+    int copied_item;          /* shows a check mark until cleared, -1 = none */
+    TTF_Text *icon_copy, *icon_check;
 } View;
 
 void view_init(View *v, TTF_TextEngine *engine, const Theme *theme);
@@ -113,6 +119,17 @@ bool view_at_end(const View *v);
 /* The source line shown at the top of the viewport (1-based). */
 int view_top_line(const View *v);
 float view_line_height(const View *v);
+
+/* Copy button of code blocks. view_hover updates which block shows the
+ * button for the mouse at viewport position (x, y) (pass a negative x when
+ * the mouse left the viewer) and returns true when a redraw is needed. */
+bool view_hover(View *v, float x, float y);
+/* Item index of the copy button under (x, y), -1 if none. */
+int view_copy_button_at(View *v, float x, float y);
+/* The raw code of a code block item (SDL_free it), NULL if not one. */
+char *view_code_text(View *v, int item);
+/* Shows a check mark on the item's button (-1 removes it). */
+void view_set_copied(View *v, int item);
 
 /* Link under a viewport position (pixels); returns false if none. */
 bool view_link_at(View *v, float x, float y, const char **url, size_t *len);
