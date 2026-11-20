@@ -158,9 +158,26 @@ unsaved changes are never dropped silently.
 ## ![](art/png/pencil@3x.png) Neovim config
 
 `nvim/init.lua` is the editor config for the embedded Neovim pane (Neovim
-0.12+). It sets a few prose-friendly options and installs the
+0.12+). It sets a few prose-friendly options (hybrid line numbers, soft
+wrap, `scrolloff=10`, Space as leader, English spell checking in Markdown
+buffers) and installs the
 [catppuccin](https://github.com/catppuccin/nvim) colorscheme through the
 built-in `vim.pack`, using the Mocha flavour with brighter line numbers.
+
+A few editing plugins come along, none of them loaded at startup: each is set
+up the first time one of its keys is used.
+
+| Plugin | Keys |
+| --- | --- |
+| [mini.surround](https://github.com/nvim-mini/mini.nvim) | `gsa` add, `gsd` delete, `gsr` replace, `gsf`/`gsF` find, `gsh` highlight |
+| mini.ai | better `a`/`i` text objects, plus `t` tag, `d` digits, `e` word part, `g` whole buffer |
+| mini.pairs | closes brackets and quotes (from the first Insert mode) |
+| mini.move | `Alt+h/j/k/l` moves the line or selection |
+| [flash.nvim](https://github.com/folke/flash.nvim) | `s` jump to a label, `S` select a tree-sitter node |
+
+Spell checking is switched on just after startup, so the spell file never
+delays the first draw. `zg` adds words to the first writable `spell/` folder
+on `runtimepath`, which is your own Neovim config's.
 Yank, delete and put use the Windows clipboard (`clipboard=unnamedplus`)
 through `win32yank.exe`, which comes with the Neovim Windows release. If
 that is not on PATH, PowerShell is used instead (slower, UTF-8 safe).
