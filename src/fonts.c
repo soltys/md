@@ -27,6 +27,11 @@ static const int face_asset[FONT_FACE_COUNT] = {
     [FONT_MONO_ITALIC] = ASSET_ROBOTO_MONO_ITALIC,
     [FONT_MONO_BOLD]   = ASSET_ROBOTO_MONO_BOLD,
     [FONT_MONO_BOLD_ITALIC] = ASSET_ROBOTO_MONO_BOLD_ITALIC,
+    [FONT_SERIF]       = ASSET_SERIF_REGULAR,
+    [FONT_SERIF_ITALIC] = ASSET_SERIF_ITALIC,
+    [FONT_SERIF_MEDIUM] = ASSET_SERIF_MEDIUM,
+    [FONT_SERIF_BOLD]  = ASSET_SERIF_BOLD,
+    [FONT_SERIF_BOLD_ITALIC] = ASSET_SERIF_BOLD_ITALIC,
 };
 
 #if MD_TIMING
@@ -36,6 +41,9 @@ static const char *const face_name[FONT_FACE_COUNT] = {
     [FONT_BOLD_ITALIC] = "Roboto Bold Italic", [FONT_LIGHT] = "Roboto Light",
     [FONT_MONO] = "Roboto Mono", [FONT_MONO_ITALIC] = "Roboto Mono Italic",
     [FONT_MONO_BOLD] = "Roboto Mono Bold", [FONT_MONO_BOLD_ITALIC] = "Roboto Mono Bold Italic",
+    [FONT_SERIF] = "Roboto Serif Regular", [FONT_SERIF_ITALIC] = "Roboto Serif Italic",
+    [FONT_SERIF_MEDIUM] = "Roboto Serif Medium", [FONT_SERIF_BOLD] = "Roboto Serif Bold",
+    [FONT_SERIF_BOLD_ITALIC] = "Roboto Serif Bold Italic",
 };
 #endif
 
@@ -70,6 +78,12 @@ static TTF_Font *create_entry(FontFace face, float px)
         /* Should never happen in practice; fall back to the nearest size. */
         return cache[0].font;
     }
+    /* Roboto Serif has no Greek (Roboto has): Roboto of the same size comes
+     * first in a serif face's fallbacks. Opened before this entry so it is
+     * cached (and owns the size's symbol fallbacks) on its own. */
+    const bool serif = face >= FONT_SERIF && face <= FONT_SERIF_BOLD_ITALIC;
+    TTF_Font *sans = serif ? fonts_get(FONT_REGULAR, px) : NULL;
+    if (cache_count == MAX_CACHED_FONTS) return cache[0].font;
     TIMING_MARK("(work before font open)");
     TTF_Font *font = open_asset(face_asset[face], px);
     TIMING_MARK("open font %s %.2fpx", face_name[face], px);
@@ -97,6 +111,7 @@ static TTF_Font *create_entry(FontFace face, float px)
         nerd = open_asset(ASSET_ROBOTO_MONO, px);
         TIMING_MARK("open fallback Roboto Mono (Nerd icons) %.2fpx", px);
     }
+    if (sans) TTF_AddFallbackFont(font, sans);
     if (math) TTF_AddFallbackFont(font, math);
     if (symbols) TTF_AddFallbackFont(font, symbols);
     bool mono = face == FONT_MONO || face == FONT_MONO_ITALIC || face == FONT_MONO_BOLD ||
@@ -120,24 +135,55 @@ static TTF_Font *create_entry(FontFace face, float px)
     return font;
 }
 
-bool fonts_init(float warm_px)
+static const int serif_assets[] = {
+    ASSET_SERIF_REGULAR, ASSET_SERIF_BOLD, ASSET_SERIF_ITALIC,
+    ASSET_SERIF_MEDIUM, ASSET_SERIF_BOLD_ITALIC,
+};
+
+bool fonts_init(float warm_px, bool serif)
 {
     if (!TTF_Init()) return false;
     TIMING_MARK("TTF_Init (FreeType, HarfBuzz)");
     /* Warm the body font (and with it FreeType, HarfBuzz and the symbol
      * fallbacks) so the first frame only has to rasterise glyphs. */
-    if (!create_entry(FONT_REGULAR, warm_px)) return false;
+    if (!create_entry(serif ? FONT_SERIF : FONT_REGULAR, warm_px)) return false;
     /* Unpack the other faces in the background, roughly in the order a
      * page asks for them, so the main thread finds them ready. The emoji
-     * font is not among them: see fonts_prefetch_emoji(). */
+     * font is not among them: see fonts_prefetch_emoji(). Roboto Serif
+     * only when it is the body font: otherwise it waits for F7. */
     static const int later[] = {
         ASSET_ROBOTO_BOLD, ASSET_ROBOTO_MEDIUM, ASSET_ROBOTO_ITALIC,
         ASSET_ROBOTO_MONO_BOLD, ASSET_ROBOTO_MONO_ITALIC, ASSET_ROBOTO_BOLD_ITALIC,
         ASSET_ROBOTO_MONO_BOLD_ITALIC, ASSET_ROBOTO_LIGHT,
     };
-    asset_prefetch(later, (int)SDL_arraysize(later));
+    static const int later_serif[] = {
+        ASSET_SERIF_BOLD, ASSET_SERIF_ITALIC, ASSET_SERIF_MEDIUM,
+        ASSET_ROBOTO_MONO_BOLD, ASSET_ROBOTO_MONO_ITALIC, ASSET_SERIF_BOLD_ITALIC,
+        ASSET_ROBOTO_MONO_BOLD_ITALIC, ASSET_ROBOTO_REGULAR, ASSET_ROBOTO_MEDIUM,
+        ASSET_ROBOTO_LIGHT, ASSET_ROBOTO_BOLD, ASSET_ROBOTO_ITALIC, ASSET_ROBOTO_BOLD_ITALIC,
+    };
+    if (serif) asset_prefetch(later_serif, (int)SDL_arraysize(later_serif));
+    else asset_prefetch(later, (int)SDL_arraysize(later));
     TIMING_MARK("start unpacking the other faces");
     return true;
+}
+
+FontFace fonts_body_face(FontFace face, bool serif)
+{
+    if (!serif) return face;
+    switch (face) {
+    case FONT_REGULAR:     return FONT_SERIF;
+    case FONT_ITALIC:      return FONT_SERIF_ITALIC;
+    case FONT_MEDIUM:      return FONT_SERIF_MEDIUM;
+    case FONT_BOLD:        return FONT_SERIF_BOLD;
+    case FONT_BOLD_ITALIC: return FONT_SERIF_BOLD_ITALIC;
+    default:               return face;
+    }
+}
+
+void fonts_prefetch_serif(void)
+{
+    asset_prefetch(serif_assets, (int)SDL_arraysize(serif_assets));
 }
 
 void fonts_prefetch_emoji(void)

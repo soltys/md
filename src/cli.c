@@ -49,6 +49,12 @@ static const char HELP[] =
 "                        Windows' light / dark app mode, also when it changes\n"
 "                        while md runs). '--theme dark' works too. The last\n"
 "                        theme option wins.\n"
+"    --serif             Show the text in Roboto Serif (Roboto's shapes with\n"
+"                        serifs) instead of Roboto. F7 or the Aa button switches\n"
+"                        while md runs.\n"
+"    --sans              Show the text in Roboto (the default).\n"
+"    --font=FONT         sans or serif, the same as --sans / --serif. The last\n"
+"                        font option wins.\n"
 "    --renderer=NAME     Draw with this SDL renderer: direct3d11 (the default\n"
 "                        on Windows), direct3d12, opengl or software. The\n"
 "                        MD_RENDERER environment variable sets the same thing\n"
@@ -89,6 +95,9 @@ static const char HELP[] =
 "    F5                  Reload the file from disk, keeping the scroll position.\n"
 "                        With the editor running Neovim re-reads it, unless the\n"
 "                        buffer has unsaved changes (then nothing is reloaded)\n"
+"    F7                  Switch the text between Roboto and Roboto Serif. The\n"
+"                        Aa button in the top-right corner of the preview (shown\n"
+"                        while the mouse is over it) does the same\n"
 "    F8                  Switch between the light and dark theme (md then\n"
 "                        stops following the Windows setting until restarted)\n"
 "    F12                 Save the whole rendered document as a PNG image (asks\n"
@@ -142,7 +151,7 @@ static const char HELP[] =
 "\n"
 "EDITOR\n"
 "    The editor pane is a real Neovim (nvim --embed). Every key except md's\n"
-"    Ctrl+Shift shortcuts and F1, F2, F5, F8 and F12 goes to Neovim, including\n"
+"    Ctrl+Shift shortcuts and F1, F2, F5, F7, F8 and F12 goes to Neovim, including\n"
 "    the mouse.\n"
 "\n"
 "    - The preview re-renders from the buffer as you type, before you save.\n"
@@ -179,8 +188,8 @@ static const char HELP[] =
 "    YAML front matter (between --- lines at the top of the file) is shown as\n"
 "    a highlighted YAML code block. TOML front matter (+++) is hidden.\n"
 "\n"
-"    Fonts (Roboto, Roboto Mono Nerd Font, Noto Color Emoji, Noto Sans Math\n"
-"    and Symbols 2 for arrows and symbols) are built into md.exe;\n"
+"    Fonts (Roboto, Roboto Serif, Roboto Mono Nerd Font, Noto Color Emoji,\n"
+"    Noto Sans Math and Symbols 2 for arrows and symbols) are built into md.exe;\n"
 "    nothing has to be installed besides Neovim for the editor.\n"
 "\n"
 "ENVIRONMENT\n"
@@ -280,12 +289,16 @@ int cli_parse(int argc, char **argv, CliOptions *out)
     for (int i = 1; i < argc; ++i) {
         const char *a = argv[i];
         if (!only_files && a[0] == '-' && a[1] != '\0') {
-            const char *theme = NULL;
+            const char *theme = NULL, *font = NULL;
             if (is(a, "-e", "--edit")) out->edit = true;
             else if (is(a, "-l", "--light")) out->theme = CLI_THEME_LIGHT;
             else if (is(a, "-d", "--dark")) out->theme = CLI_THEME_DARK;
             else if (SDL_strncmp(a, "--theme=", 8) == 0) theme = a + 8;
             else if (is(a, "--theme", NULL)) theme = i + 1 < argc ? argv[++i] : "";
+            else if (is(a, "--serif", NULL)) out->serif = true;
+            else if (is(a, "--sans", "--sans-serif")) out->serif = false;
+            else if (SDL_strncmp(a, "--font=", 7) == 0) font = a + 7;
+            else if (is(a, "--font", NULL)) font = i + 1 < argc ? argv[++i] : "";
             else if (SDL_strncmp(a, "--renderer=", 11) == 0) out->renderer = a + 11;
             else if (is(a, "--renderer", NULL)) out->renderer = i + 1 < argc ? argv[++i] : "";
             else if (is(a, "-h", "--help")) { print(HELP, false); return 0; }
@@ -297,6 +310,18 @@ int cli_parse(int argc, char **argv, CliOptions *out)
                 print(msg ? msg : "md: unknown option\n", true);
                 SDL_free(msg);
                 return 2;
+            }
+            if (font) {
+                if (SDL_strcasecmp(font, "serif") == 0) out->serif = true;
+                else if (SDL_strcasecmp(font, "sans") == 0 || SDL_strcasecmp(font, "sans-serif") == 0)
+                    out->serif = false;
+                else {
+                    char *msg = NULL;
+                    SDL_asprintf(&msg, "md: unknown font '%s' (use sans or serif)\n", font);
+                    print(msg ? msg : "md: unknown font\n", true);
+                    SDL_free(msg);
+                    return 2;
+                }
             }
             if (theme) {
                 if (SDL_strcasecmp(theme, "light") == 0) out->theme = CLI_THEME_LIGHT;

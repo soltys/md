@@ -10,6 +10,7 @@ typedef struct CliOptions {
     bool edit;          /* -e / --edit: open with the editor */
     int theme;          /* CLI_THEME_*: --light / --dark / --theme */
     const char *renderer; /* --renderer=NAME, or NULL for the default */
+    bool serif;         /* --serif / --font=serif: Roboto Serif body text */
 } CliOptions;
 
 /* Parses the command line. Returns -1 to go on and start md, or an exit

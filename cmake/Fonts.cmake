@@ -56,7 +56,19 @@ FetchContent_Declare(noto_symbols2
     DOWNLOAD_NO_EXTRACT TRUE
     SOURCE_SUBDIR do-not-add)
 
-FetchContent_MakeAvailable(roboto noto_emoji noto_math noto_symbols2)
+# Roboto Serif (Commercial Type for Google, OFL): Roboto's proportions and
+# shapes with serifs, the optional body font (F7, --serif, the "Aa" button).
+# Static instances at the 14pt optical size, the one drawn for body text on
+# screen; only the five faces a page uses are embedded (~1.4 MB of TTF,
+# a fraction of that after zstd) and they are unpacked only when serif text
+# is first shown.
+FetchContent_Declare(roboto_serif
+    URL      https://github.com/googlefonts/roboto-serif/releases/download/v1.008/RobotoSerifFonts-v1.008.zip
+    URL_HASH SHA256=366f437312f40a0039d6719e6493d64828a982ac2734f9618f4c07c8684b6984
+    DOWNLOAD_EXTRACT_TIMESTAMP TRUE
+    SOURCE_SUBDIR do-not-add)
+
+FetchContent_MakeAvailable(roboto roboto_serif noto_emoji noto_math noto_symbols2)
 
 set(_r "${roboto_SOURCE_DIR}/hinted/static")
 set(MD_FONT_ROBOTO_REGULAR     "${_r}/Roboto-Regular.ttf")
@@ -69,6 +81,12 @@ set(MD_FONT_ROBOTO_MONO        "${roboto_mono_nf_regular_SOURCE_DIR}/RobotoMonoN
 set(MD_FONT_ROBOTO_MONO_ITALIC "${roboto_mono_nf_italic_SOURCE_DIR}/RobotoMonoNerdFontMono-Italic.ttf")
 set(MD_FONT_ROBOTO_MONO_BOLD   "${roboto_mono_nf_bold_SOURCE_DIR}/RobotoMonoNerdFontMono-Bold.ttf")
 set(MD_FONT_ROBOTO_MONO_BOLD_ITALIC "${roboto_mono_nf_bolditalic_SOURCE_DIR}/RobotoMonoNerdFontMono-BoldItalic.ttf")
+set(_rs "${roboto_serif_SOURCE_DIR}/ttf")
+set(MD_FONT_SERIF_REGULAR     "${_rs}/RobotoSerif14pt-Regular.ttf")
+set(MD_FONT_SERIF_ITALIC      "${_rs}/RobotoSerif14pt-Italic.ttf")
+set(MD_FONT_SERIF_MEDIUM      "${_rs}/RobotoSerif14pt-Medium.ttf")
+set(MD_FONT_SERIF_BOLD        "${_rs}/RobotoSerif14pt-Bold.ttf")
+set(MD_FONT_SERIF_BOLD_ITALIC "${_rs}/RobotoSerif14pt-BoldItalic.ttf")
 set(MD_FONT_NOTO_EMOJI         "${noto_emoji_SOURCE_DIR}/NotoColorEmoji.ttf")
 set(MD_FONT_NOTO_MATH          "${noto_math_SOURCE_DIR}/NotoSansMath-Regular.ttf")
 set(MD_FONT_NOTO_SYMBOLS2      "${noto_symbols2_SOURCE_DIR}/NotoSansSymbols2-Regular.ttf")
@@ -81,6 +99,11 @@ endforeach()
 foreach(_f EMOJI MATH SYMBOLS2)
     if(NOT EXISTS "${MD_FONT_NOTO_${_f}}")
         message(FATAL_ERROR "Missing font: ${MD_FONT_NOTO_${_f}}")
+    endif()
+endforeach()
+foreach(_f REGULAR ITALIC MEDIUM BOLD BOLD_ITALIC)
+    if(NOT EXISTS "${MD_FONT_SERIF_${_f}}")
+        message(FATAL_ERROR "Missing font: ${MD_FONT_SERIF_${_f}}")
     endif()
 endforeach()
 
@@ -97,7 +120,8 @@ set(_md_pack_dir "${CMAKE_CURRENT_BINARY_DIR}/packed-fonts")
 set(_md_raw_sizes "")
 foreach(_f ROBOTO_REGULAR ROBOTO_ITALIC ROBOTO_MEDIUM ROBOTO_BOLD ROBOTO_BOLD_ITALIC
            ROBOTO_LIGHT ROBOTO_MONO ROBOTO_MONO_ITALIC ROBOTO_MONO_BOLD
-           ROBOTO_MONO_BOLD_ITALIC NOTO_EMOJI NOTO_MATH NOTO_SYMBOLS2)
+           ROBOTO_MONO_BOLD_ITALIC NOTO_EMOJI NOTO_MATH NOTO_SYMBOLS2
+           SERIF_REGULAR SERIF_ITALIC SERIF_MEDIUM SERIF_BOLD SERIF_BOLD_ITALIC)
     if(NOT MD_COMPRESS_FONTS)
         break()
     endif()

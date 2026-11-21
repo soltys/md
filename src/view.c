@@ -35,6 +35,7 @@ typedef struct TextStyle {
     SDL_Color color;
     bool pre;                 /* keep whitespace, break only at newlines */
     float line_factor;
+    bool sans;                /* stays Roboto in serif mode (code block labels) */
 } TextStyle;
 
 typedef struct Tok {
@@ -140,7 +141,7 @@ static void tokenize(View *v, const char *text, uint32_t a, uint32_t b, const Sp
 {
     uint16_t style = sp ? sp->style : 0;
     float px = ts->px * ((style & ST_CODE) && !ts->pre ? 0.875f : 1.0f);
-    TTF_Font *font = fonts_get(styled_face(ts->face, style), px);
+    TTF_Font *font = fonts_get(fonts_body_face(styled_face(ts->face, style), v->serif && !ts->sans), px);
 
     Tok base;
     SDL_zero(base);
@@ -167,7 +168,7 @@ static void tokenize(View *v, const char *text, uint32_t a, uint32_t b, const Sp
         }
         /* Loading or failed: show the alt text. */
         base.style = (uint16_t)((style & ~ST_IMAGE) | ST_ITALIC);
-        font = fonts_get(styled_face(ts->face, base.style), px);
+        font = fonts_get(fonts_body_face(styled_face(ts->face, base.style), v->serif && !ts->sans), px);
         base.img = img;
     }
 
@@ -344,7 +345,7 @@ static float layout_text(View *v, Para *out, uint32_t text_off, uint32_t len,
     float y = 0;
     int i = 0;
     if (tok_count == 0 && out) {
-        TTF_Font *f = fonts_get(ts->face, ts->px);
+        TTF_Font *f = fonts_get(fonts_body_face(ts->face, v->serif && !ts->sans), ts->px);
         out->h = SDL_roundf((float)TTF_GetFontLineSkip(f) * ts->line_factor);
         return 0;
     }
@@ -470,6 +471,7 @@ static TextStyle body_style(const View *v, const Block *b)
     ts.color = b->quote_depth ? v->theme.muted : v->theme.text;
     ts.pre = false;
     ts.line_factor = LINE_FACTOR;
+    ts.sans = false;
     if (b->kind == BLOCK_HEADING) {
         ts.face = b->level <= 4 ? FONT_BOLD : FONT_MEDIUM;
         ts.px = BODY_PX * v->scale * heading_scale[b->level <= 6 ? b->level : 6];
@@ -616,7 +618,7 @@ static void layout_item(View *v, int idx)
         it->marker = layout_para(v, b->marker, b->marker_len, 0, 0, 1e9f, &ms);
     }
     if (b->lang_len) {
-        TextStyle ls = {FONT_MEDIUM, BODY_PX * 0.75f * s, v->theme.block_label, false, 1.0f};
+        TextStyle ls = {FONT_MEDIUM, BODY_PX * 0.75f * s, v->theme.block_label, false, 1.0f, true};
         it->lang = layout_para(v, b->lang, b->lang_len, 0, 0, 1e9f, &ls);
     }
 
@@ -770,7 +772,8 @@ void view_destroy(View *v)
     if (v->msg_body) TTF_DestroyText(v->msg_body);
     if (v->icon_copy) TTF_DestroyText(v->icon_copy);
     if (v->icon_check) TTF_DestroyText(v->icon_check);
-    v->icon_copy = v->icon_check = NULL;
+    if (v->icon_font) TTF_DestroyText(v->icon_font);
+    v->icon_copy = v->icon_check = v->icon_font = NULL;
     v->doc = NULL;
 }
 
@@ -1095,6 +1098,66 @@ static void draw_copy_button(View *v, SDL_Renderer *r, const ViewItem *it, int i
                          SDL_roundf(bt.y + (bt.h - (float)tht) * 0.5f));
 }
 
+/* The "Aa" font button, top-right corner of the viewport (it does not
+ * scroll). In viewport coordinates. */
+static SDL_FRect font_button_rect(const View *v)
+{
+    const float s = v->scale;
+    const float size = SDL_roundf(32 * s), margin = SDL_roundf(10 * s);
+    return (SDL_FRect){SDL_roundf(v->width - margin - size), margin, size, size};
+}
+
+bool view_font_button_at(View *v, float x, float y)
+{
+    if (!v->doc || v->doc->error || v->doc->block_count == 0) return false;
+    SDL_FRect bt = font_button_rect(v);
+    return x >= bt.x && x < bt.x + bt.w && y >= bt.y && y < bt.y + bt.h;
+}
+
+/* "Aa" in the face a click switches to, so the button previews it. */
+static void draw_font_button(View *v, SDL_Renderer *r)
+{
+    const Theme *th = &v->theme;
+    SDL_FRect bt = font_button_rect(v);
+    const bool hot = v->hover_font_button;
+    set_color(r, hot ? th->block_button_hover : th->block_button);
+    SDL_RenderFillRect(r, &bt);
+
+    const bool to_serif = !v->serif;
+    TTF_Font *font = fonts_get(to_serif ? FONT_SERIF : FONT_REGULAR, SDL_roundf(17 * v->scale));
+    if (!font) return;
+    if (v->icon_font && v->icon_font_serif != to_serif) {
+        TTF_DestroyText(v->icon_font);
+        v->icon_font = NULL;
+    }
+    if (!v->icon_font) v->icon_font = TTF_CreateText(v->engine, font, "Aa", 0);
+    else if (TTF_GetTextFont(v->icon_font) != font) TTF_SetTextFont(v->icon_font, font);
+    if (!v->icon_font) return;
+    v->icon_font_serif = to_serif;
+    SDL_Color c = hot ? th->block_text : th->block_label;
+    TTF_SetTextColor(v->icon_font, c.r, c.g, c.b, 0xFF);
+    int tw = 0, tht = 0;
+    TTF_GetTextSize(v->icon_font, &tw, &tht);
+    TTF_DrawRendererText(v->icon_font, SDL_roundf(bt.x + (bt.w - (float)tw) * 0.5f),
+                         SDL_roundf(bt.y + (bt.h - (float)tht) * 0.5f));
+}
+
+bool view_set_serif(View *v, bool serif)
+{
+    if (serif == v->serif) return false;
+    v->serif = serif;
+    if (serif) fonts_prefetch_serif();
+    /* Fonts are baked into the laid-out texts: lay the document out again.
+     * Serif text is taller and wider, so keep the source line at the top
+     * rather than the pixel offset. */
+    const int line = v->doc && !v->doc->error && v->scroll > 0 ? view_top_line(v) : 0;
+    Document *doc = v->doc;
+    v->doc = NULL;
+    view_set_document(v, doc, true);
+    if (line > 0) view_scroll_to_line(v, line);
+    return true;
+}
+
 void view_draw(View *v, SDL_Renderer *r)
 {
     const Theme *th = &v->theme;
@@ -1184,6 +1247,7 @@ void view_draw(View *v, SDL_Renderer *r)
         draw_para(v, r, &it->para, it->x, it->y + dy);
     }
     view_draw_selection(v, r);
+    if (v->mouse_inside) draw_font_button(v, r);
 }
 
 /* F12: the whole document as one image, at the viewer's width and scale.
@@ -1226,8 +1290,10 @@ SDL_Surface *view_render_surface(View *v, SDL_Renderer *r, const char **error)
     const float old_scroll = v->scroll, old_height = v->height;
     const bool old_sel = v->has_sel;
     const int old_hover = v->hover_code, old_copied = v->copied_item;
+    const bool old_inside = v->mouse_inside;
     v->has_sel = false; /* no selection highlight in the picture */
     v->hover_code = v->copied_item = -1; /* nor copy buttons */
+    v->mouse_inside = false; /* nor the font button */
 
     SDL_SetRenderTarget(r, tex);
     SDL_SetRenderViewport(r, NULL);
@@ -1251,6 +1317,7 @@ SDL_Surface *view_render_surface(View *v, SDL_Renderer *r, const char **error)
     v->has_sel = old_sel;
     v->hover_code = old_hover;
     v->copied_item = old_copied;
+    v->mouse_inside = old_inside;
     SDL_DestroyTexture(tex);
     if (*error) {
         SDL_DestroySurface(out);
@@ -1277,6 +1344,7 @@ static int code_block_at(View *v, float x, float y)
 
 int view_copy_button_at(View *v, float x, float y)
 {
+    if (view_font_button_at(v, x, y)) return -1; /* the font button is on top */
     int i = code_block_at(v, x, y);
     if (i < 0) return -1;
     SDL_FRect bt = copy_button_rect(v, &v->items[i]);
@@ -1286,11 +1354,16 @@ int view_copy_button_at(View *v, float x, float y)
 
 bool view_hover(View *v, float x, float y)
 {
-    int i = code_block_at(v, x, y);
+    const bool inside = x >= 0;
+    const bool font = inside && view_font_button_at(v, x, y);
+    int i = font ? -1 : code_block_at(v, x, y);
     bool button = i >= 0 && view_copy_button_at(v, x, y) == i;
-    bool changed = i != v->hover_code || button != v->hover_button;
+    bool changed = i != v->hover_code || button != v->hover_button ||
+                   inside != v->mouse_inside || font != v->hover_font_button;
     v->hover_code = i;
     v->hover_button = button;
+    v->mouse_inside = inside;
+    v->hover_font_button = font;
     return changed;
 }
 

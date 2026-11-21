@@ -84,6 +84,16 @@ typedef struct View {
     bool hover_button;        /* the mouse is on the button itself */
     int copied_item;          /* shows a check mark until cleared, -1 = none */
     TTF_Text *icon_copy, *icon_check;
+
+    /* Body text in Roboto Serif instead of Roboto (F7, --serif, the "Aa"
+     * button). Change it with view_set_serif(). */
+    bool serif;
+    /* The "Aa" font button in the top-right corner, shown while the mouse
+     * is over the preview. */
+    bool mouse_inside;
+    bool hover_font_button;
+    TTF_Text *icon_font;
+    bool icon_font_serif;     /* which face icon_font was made with */
 } View;
 
 void view_init(View *v, TTF_TextEngine *engine, const Theme *theme);
@@ -130,6 +140,12 @@ int view_copy_button_at(View *v, float x, float y);
 char *view_code_text(View *v, int item);
 /* Shows a check mark on the item's button (-1 removes it). */
 void view_set_copied(View *v, int item);
+
+/* Switches the body text between Roboto and Roboto Serif, keeping the
+ * scroll position. Returns true when it changed. */
+bool view_set_serif(View *v, bool serif);
+/* True when viewport position (x, y) is on the "Aa" font button. */
+bool view_font_button_at(View *v, float x, float y);
 
 /* Link under a viewport position (pixels); returns false if none. */
 bool view_link_at(View *v, float x, float y, const char **url, size_t *len);

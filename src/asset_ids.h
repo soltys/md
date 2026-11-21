@@ -17,6 +17,12 @@
 #define ASSET_ROBOTO_MONO_BOLD_ITALIC 112
 #define ASSET_NOTO_MATH          113
 #define ASSET_NOTO_SYMBOLS2      114
+/* Roboto Serif 14pt: the optional serif body font (F7 / --serif). */
+#define ASSET_SERIF_REGULAR      115
+#define ASSET_SERIF_ITALIC       116
+#define ASSET_SERIF_MEDIUM       117
+#define ASSET_SERIF_BOLD         118
+#define ASSET_SERIF_BOLD_ITALIC  119
 
 /* Application icon (art/png/md-icon.ico, drawn in art/sprites.txt). It is the
  * first icon in the exe, so Explorer shows it and SDL uses it for the window

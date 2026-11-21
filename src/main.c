@@ -30,11 +30,13 @@ static App app;
 
 /* ----------------------------------------------------------- workers -- */
 
+static bool start_serif; /* --serif: Roboto Serif from the first frame */
+
 static int SDLCALL font_thread_main(void *unused)
 {
     (void)unused;
     TIMING_THREAD("fonts");
-    return fonts_init(16.0f) ? 0 : -1;
+    return fonts_init(16.0f, start_serif) ? 0 : -1;
 }
 
 static void wake_main_thread(void)
@@ -411,6 +413,7 @@ static const char *const HELP[][2] = {
     {"F1", "Show / hide this help"},
     {"F2", "Copy the full path of the file"},
     {"F5", "Reload the file from disk"},
+    {"F7", "Switch between sans-serif and serif text"},
     {"F8", "Switch between light and dark theme"},
     {"F12", "Save the preview as a PNG image"},
     {NULL, "Layout"},
@@ -1100,7 +1103,8 @@ static void viewer_hover(float x, float y)
     if (view_hover(&app.view, inside ? vx : -1, vy)) app.dirty = true;
     const char *url;
     size_t len;
-    set_hand_cursor(inside && (app.view.hover_button || view_link_at(&app.view, vx, vy, &url, &len)));
+    set_hand_cursor(inside && (app.view.hover_button || app.view.hover_font_button ||
+                               view_link_at(&app.view, vx, vy, &url, &len)));
 }
 
 /* After scrolling, the content under a still mouse has changed. */
@@ -1198,6 +1202,15 @@ static void set_dark(bool dark)
     app.view.doc = NULL;
     app.view.theme = dark ? THEME_DARK : THEME_LIGHT;
     view_set_document(&app.view, doc, true);
+    app.dirty = true;
+}
+
+/* Sans-serif / serif body text: --serif, F7, or the "Aa" button. */
+static void toggle_serif(void)
+{
+    if (!app.fonts_ok) return;
+    view_set_serif(&app.view, !app.view.serif);
+    show_toast(app.view.serif ? "Serif font (Roboto Serif)" : "Sans-serif font (Roboto)");
     app.dirty = true;
 }
 
@@ -1375,6 +1388,7 @@ static bool handle_event(const SDL_Event *e)
                 show_toast(app.dark ? "Dark theme" : "Light theme");
                 break;
             }
+            if (e->key.key == SDLK_F7) { toggle_serif(); break; }
             if (e->key.key == SDLK_F12) { show_save_png_dialog(); break; }
         }
         if (app_shortcut(&e->key)) break;
@@ -1452,9 +1466,12 @@ static bool handle_event(const SDL_Event *e)
             }
             break;
         }
-        int copy_item = down && e->button.button == SDL_BUTTON_LEFT && viewer_visible() &&
-                        in_rect(&app.viewer_rect, x, y) ? view_copy_button_at(&app.view, vx, vy) : -1;
-        if (copy_item >= 0) {
+        const bool left_in_viewer = down && e->button.button == SDL_BUTTON_LEFT && viewer_visible() &&
+                                    in_rect(&app.viewer_rect, x, y);
+        int copy_item = left_in_viewer ? view_copy_button_at(&app.view, vx, vy) : -1;
+        if (left_in_viewer && view_font_button_at(&app.view, vx, vy)) {
+            toggle_serif();
+        } else if (copy_item >= 0) {
             copy_code_block(copy_item);
         } else if (down && e->button.button == SDL_BUTTON_LEFT && viewer_visible() &&
             in_rect(&app.viewer_rect, x, y)) {
@@ -1589,6 +1606,7 @@ int main(int argc, char **argv)
     const bool edit = opts.edit;
 
     /* 1. Kick off background work before touching the window system. */
+    start_serif = opts.serif;
     app.font_thread = SDL_CreateThread(font_thread_main, "md-fonts", NULL);
     TIMING_MARK("spawn font thread");
     if (file) start_load(file);
@@ -1681,6 +1699,7 @@ int main(int argc, char **argv)
         app.engine = TTF_CreateRendererTextEngine(app.renderer);
     }
     view_init(&app.view, app.engine, theme);
+    app.view.serif = opts.serif;
     TIMING_MARK("create text engine, init view");
 
     if (edit) set_layout(LAYOUT_VIEWER); /* toggles to the split, focus on the editor */

@@ -9,7 +9,8 @@
 * C11, compiled with MSVC only, built with CMake
 * SDL3 + SDL3_ttf (FreeType, HarfBuzz, plutosvg) + SDL3_image for rendering
 * tree-sitter + tree-sitter-markdown for parsing
-* Roboto (Regular, Italic, Medium, Bold, Bold Italic, Light), Roboto Mono
+* Roboto (Regular, Italic, Medium, Bold, Bold Italic, Light), Roboto Serif
+  (Regular, Italic, Medium, Bold, Bold Italic; optional body font), Roboto Mono
   Nerd Font (Regular, Italic, Bold, Bold Italic; editor and code), Noto Color
   Emoji and Noto Sans Math / Symbols 2 (arrows, math, check marks) embedded in
   the executable
@@ -88,6 +89,7 @@ Changing `CMAKE_INSTALL_PREFIX` when configuring also changes the default.
 md.exe file.md          # viewer only
 md.exe -e file.md       # editor open from the start (also --edit)
 md.exe --dark file.md   # force the dark theme (--light, -d, -l, --theme=system)
+md.exe --serif file.md  # text in Roboto Serif (--sans, --font=serif|sans)
 md.exe --help           # every option and shortcut (also -h, /?)
 md.exe --version        # version from CMakeLists.txt project() (also -V)
 ```
@@ -104,7 +106,9 @@ follows the buffer as you type, and scrolling stays in sync both ways: scroll
 the editor and the preview follows, scroll the preview and the editor follows.
 Select text in the preview with the mouse (or Ctrl+A) and press Ctrl+C to copy
 it as rich text (Ctrl+Shift+C for plain text). Code blocks get a copy button in
-their top-right corner when the mouse is over them. Without `nvim` on `PATH`, md stays a viewer and says why when you ask for
+their top-right corner when the mouse is over them, and the preview shows an
+Aa button in its top-right corner that switches the text between Roboto and
+Roboto Serif (same as F7). Without `nvim` on `PATH`, md stays a viewer and says why when you ask for
 the editor.
 
 See [docs/features.md](docs/features.md) for a tour of everything md renders;
@@ -115,6 +119,7 @@ open it in md to try it out.
 | F1 | Show / hide a list of all shortcuts |
 | F2 | Copy the full path of the open file |
 | F5 | Reload the file from disk (through Neovim when it runs; unsaved edits are kept) |
+| F7 | Switch the text between Roboto and Roboto Serif (also `--serif`, or the Aa button) |
 | F8 | Switch between the light and dark theme (also `--light` / `--dark`) |
 | F12 | Save the whole rendered document as a PNG image |
 | Ctrl+Shift+O | Switch split orientation (side by side / stacked) |

@@ -44,6 +44,11 @@ static const char *asset_path(int id)
     case ASSET_ROBOTO_MONO_BOLD_ITALIC: return MD_ASSET_ROBOTO_MONO_BOLD_ITALIC;
     case ASSET_NOTO_MATH:          return MD_ASSET_NOTO_MATH;
     case ASSET_NOTO_SYMBOLS2:      return MD_ASSET_NOTO_SYMBOLS2;
+    case ASSET_SERIF_REGULAR:      return MD_ASSET_SERIF_REGULAR;
+    case ASSET_SERIF_ITALIC:       return MD_ASSET_SERIF_ITALIC;
+    case ASSET_SERIF_MEDIUM:       return MD_ASSET_SERIF_MEDIUM;
+    case ASSET_SERIF_BOLD:         return MD_ASSET_SERIF_BOLD;
+    case ASSET_SERIF_BOLD_ITALIC:  return MD_ASSET_SERIF_BOLD_ITALIC;
     default:                       return NULL;
     }
 }
@@ -77,6 +82,11 @@ static const char *asset_name(int id)
     case ASSET_NOTO_EMOJI:         return "Noto Color Emoji";
     case ASSET_NOTO_MATH:          return "Noto Sans Math";
     case ASSET_NOTO_SYMBOLS2:      return "Noto Sans Symbols 2";
+    case ASSET_SERIF_REGULAR:      return "Roboto Serif Regular";
+    case ASSET_SERIF_ITALIC:       return "Roboto Serif Italic";
+    case ASSET_SERIF_MEDIUM:       return "Roboto Serif Medium";
+    case ASSET_SERIF_BOLD:         return "Roboto Serif Bold";
+    case ASSET_SERIF_BOLD_ITALIC:  return "Roboto Serif Bold Italic";
     default:                       return "asset";
     }
 }
