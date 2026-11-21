@@ -19,6 +19,7 @@ GRAMMAR(rust)
 GRAMMAR(c_sharp)
 GRAMMAR(lua)
 GRAMMAR(yaml)
+GRAMMAR(powershell)
 
 typedef struct Lang {
     const char *aliases;     /* space-separated, lower case */
@@ -44,6 +45,7 @@ static Lang langs[] = {
     L(rust, "rust rs"),
     L(c_sharp, "csharp cs c# c-sharp"),
     L(lua, "lua luau"),
+    L(powershell, "powershell ps1 psm1 psd1 pwsh posh"),
     /* tree-sitter-yaml lists the generic @string before the @property keys. */
     {"yaml yml", tree_sitter_yaml, md_query_yaml, &md_query_yaml_len, NULL, NULL, NULL, NULL, true},
 };

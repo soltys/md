@@ -174,6 +174,10 @@ md_add_grammar(lua        ${_gh}/tree-sitter-grammars/tree-sitter-lua/releases/d
     dd6d995634ea7dc2eac687f4890f995f03c421e0c42c34b3cfcfc81c47e48d7e)
 md_add_grammar(yaml       ${_gh}/tree-sitter-grammars/tree-sitter-yaml/releases/download/v0.7.2/tree-sitter-yaml.tar.gz
     2707d9ff0556ee6c36a77299b4c08e5b2dcbd0d35f0b9688bb2ac8e276025f72)
+# tree-sitter-powershell attaches no source tarball to its releases, so
+# it is cloned.
+md_add_grammar(powershell ${_gh}/airbus-cert/tree-sitter-powershell.git
+    v0.26.6)
 
 file(WRITE "${_queries_c}.tmp" "${_queries_body}")
 file(COPY_FILE "${_queries_c}.tmp" "${_queries_c}" ONLY_IF_DIFFERENT)

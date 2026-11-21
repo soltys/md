@@ -161,8 +161,8 @@ Emoji use Noto Color Emoji, in the preview and in the editor:
 ## Code
 
 Inline `code` and fenced blocks with syntax highlighting for C, C++, C#,
-Python, JavaScript, JSON, Bash, Rust, Lua and YAML. Move the mouse over a
-block and click the button in its top-right corner to copy its code:
+Python, JavaScript, JSON, Bash, Rust, Lua, YAML and PowerShell. Move the
+mouse over a block and click the button in its top-right corner to copy its code:
 
 ```c
 #include <stdio.h>
