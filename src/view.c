@@ -1158,6 +1158,127 @@ bool view_set_serif(View *v, bool serif)
     return true;
 }
 
+/* ------------------------------------------------------- scroll bar -- */
+
+#define SB_HOT_W 14.0f   /* the strip on the right edge that reacts */
+#define SB_THIN 3.0f     /* thumb width at rest */
+#define SB_WIDE 8.0f     /* ... and with the mouse on it */
+#define SB_MARGIN 2.0f
+#define SB_MIN_THUMB 32.0f
+
+/* The whole document's height. While the rest is still being laid out in
+ * the background, extrapolated from the part that is. */
+static float total_height(const View *v)
+{
+    if (v->laid <= 0) return 0;
+    if (v->laid >= v->item_count) return v->content_height;
+    return v->content_height * (float)v->item_count / (float)v->laid;
+}
+
+static bool scrollbar_shown(const View *v)
+{
+    return !v->exporting && v->doc && !v->doc->error && v->doc->block_count > 0 &&
+           total_height(v) > v->height + 1.0f;
+}
+
+/* Track and thumb, viewport pixels, at the given thumb width. */
+static void scrollbar_rects(const View *v, float w, SDL_FRect *track, SDL_FRect *thumb)
+{
+    const float s = v->scale, m = SDL_roundf(SB_MARGIN * s);
+    const float total = total_height(v);
+    *track = (SDL_FRect){v->width - w - m, m, w, v->height - 2 * m};
+    float th = SDL_max(SDL_roundf(SB_MIN_THUMB * s), track->h * v->height / total);
+    th = SDL_min(th, track->h);
+    const float range = SDL_max(1.0f, total - v->height);
+    const float t = SDL_clamp(v->scroll / range, 0.0f, 1.0f);
+    *thumb = (SDL_FRect){track->x, track->y + SDL_roundf((track->h - th) * t), w, SDL_roundf(th)};
+}
+
+bool view_scrollbar_at(View *v, float x, float y)
+{
+    return scrollbar_shown(v) && y >= 0 && y < v->height && x >= v->width - SB_HOT_W * v->scale &&
+           x < v->width;
+}
+
+bool view_scrollbar_press(View *v, float x, float y)
+{
+    if (!view_scrollbar_at(v, x, y)) return false;
+    SDL_FRect track, thumb;
+    scrollbar_rects(v, SB_WIDE * v->scale, &track, &thumb);
+    if (y >= thumb.y && y < thumb.y + thumb.h) {
+        v->scrollbar_drag = true;
+        v->scrollbar_grab = y - thumb.y;
+    } else {
+        /* A page towards the mouse, like the Windows scroll bars. */
+        const float page = SDL_max(v->height - 3 * view_line_height(v), v->height * 0.5f);
+        view_scroll_by(v, y < thumb.y ? -page : page);
+    }
+    return true;
+}
+
+void view_scrollbar_drag(View *v, float y)
+{
+    if (!v->scrollbar_drag) return;
+    SDL_FRect track, thumb;
+    scrollbar_rects(v, SB_WIDE * v->scale, &track, &thumb);
+    const float room = track.h - thumb.h;
+    if (room <= 0) return;
+    const float t = SDL_clamp((y - v->scrollbar_grab - track.y) / room, 0.0f, 1.0f);
+    view_scroll_to(v, t * (total_height(v) - v->height));
+}
+
+void view_scrollbar_release(View *v)
+{
+    v->scrollbar_drag = false;
+}
+
+/* A rectangle with fully rounded ends (a pill), vertical. */
+static void fill_pill(SDL_Renderer *r, const SDL_FRect *rc, SDL_Color c)
+{
+    enum { SEG = 8 };
+    const float rad = rc->w * 0.5f;
+    const SDL_FColor fc = {c.r / 255.0f, c.g / 255.0f, c.b / 255.0f, c.a / 255.0f};
+    SDL_Vertex vx[4 + 2 * (SEG + 2)];
+    int idx[6 + 2 * 3 * SEG], nv = 0, ni = 0;
+    const float x0 = rc->x, x1 = rc->x + rc->w, y0 = rc->y + rad, y1 = rc->y + rc->h - rad;
+    const float quad[4][2] = {{x0, y0}, {x1, y0}, {x1, y1}, {x0, y1}};
+    for (int i = 0; i < 4; ++i) vx[nv++] = (SDL_Vertex){{quad[i][0], quad[i][1]}, fc, {0, 0}};
+    const int q[6] = {0, 1, 2, 0, 2, 3};
+    for (int i = 0; i < 6; ++i) idx[ni++] = q[i];
+    for (int end = 0; end < 2; ++end) {
+        const float cy = end ? y1 : y0, cx = x0 + rad;
+        const int centre = nv;
+        vx[nv++] = (SDL_Vertex){{cx, cy}, fc, {0, 0}};
+        for (int k = 0; k <= SEG; ++k) {
+            const float a = SDL_PI_F * (float)k / SEG + (end ? 0.0f : SDL_PI_F);
+            vx[nv++] = (SDL_Vertex){{cx + rad * SDL_cosf(a), cy + rad * SDL_sinf(a)}, fc, {0, 0}};
+        }
+        for (int k = 0; k < SEG; ++k) {
+            idx[ni++] = centre;
+            idx[ni++] = centre + 1 + k;
+            idx[ni++] = centre + 2 + k;
+        }
+    }
+    SDL_RenderGeometry(r, NULL, vx, nv, idx, ni);
+}
+
+static void draw_scrollbar(View *v, SDL_Renderer *r)
+{
+    if (!scrollbar_shown(v)) return;
+    const Theme *th = &v->theme;
+    const bool wide = v->hover_scrollbar || v->scrollbar_drag;
+    SDL_FRect track, thumb;
+    scrollbar_rects(v, SDL_roundf((wide ? SB_WIDE : SB_THIN) * v->scale), &track, &thumb);
+    if (wide) {
+        SDL_Color bg = th->text;
+        bg.a = 0x0F;
+        fill_pill(r, &track, bg);
+    }
+    SDL_Color c = th->muted;
+    c.a = v->scrollbar_drag ? 0xE6 : wide ? 0xB3 : 0x80;
+    fill_pill(r, &thumb, c);
+}
+
 void view_draw(View *v, SDL_Renderer *r)
 {
     const Theme *th = &v->theme;
@@ -1247,6 +1368,7 @@ void view_draw(View *v, SDL_Renderer *r)
         draw_para(v, r, &it->para, it->x, it->y + dy);
     }
     view_draw_selection(v, r);
+    draw_scrollbar(v, r);
     if (v->mouse_inside) draw_font_button(v, r);
 }
 
@@ -1294,6 +1416,7 @@ SDL_Surface *view_render_surface(View *v, SDL_Renderer *r, const char **error)
     v->has_sel = false; /* no selection highlight in the picture */
     v->hover_code = v->copied_item = -1; /* nor copy buttons */
     v->mouse_inside = false; /* nor the font button */
+    v->exporting = true;      /* nor the scroll bar */
 
     SDL_SetRenderTarget(r, tex);
     SDL_SetRenderViewport(r, NULL);
@@ -1318,6 +1441,7 @@ SDL_Surface *view_render_surface(View *v, SDL_Renderer *r, const char **error)
     v->hover_code = old_hover;
     v->copied_item = old_copied;
     v->mouse_inside = old_inside;
+    v->exporting = false;
     SDL_DestroyTexture(tex);
     if (*error) {
         SDL_DestroySurface(out);
@@ -1356,10 +1480,13 @@ bool view_hover(View *v, float x, float y)
 {
     const bool inside = x >= 0;
     const bool font = inside && view_font_button_at(v, x, y);
-    int i = font ? -1 : code_block_at(v, x, y);
+    const bool bar = inside && !font && view_scrollbar_at(v, x, y);
+    int i = font || bar ? -1 : code_block_at(v, x, y);
     bool button = i >= 0 && view_copy_button_at(v, x, y) == i;
     bool changed = i != v->hover_code || button != v->hover_button ||
-                   inside != v->mouse_inside || font != v->hover_font_button;
+                   inside != v->mouse_inside || font != v->hover_font_button ||
+                   bar != v->hover_scrollbar;
+    v->hover_scrollbar = bar;
     v->hover_code = i;
     v->hover_button = button;
     v->mouse_inside = inside;

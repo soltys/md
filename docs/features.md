@@ -62,6 +62,11 @@ maximize button for **Snap Layouts**, right-click the bar (or click the icon) fo
 the system menu, resize from any edge, rounded corners and the shadow. The
 title fades when the window is not focused.
 
+The preview has a thin scroll bar on its right edge, in the theme's colours. It
+widens when the mouse comes near it: drag the thumb to scroll, or click above or
+below it to move a page. While a long document is still being laid out in the
+background, the thumb size is an estimate and settles once layout finishes.
+
 ## Front matter
 
 The YAML block between the `---` lines at the very top of this file is

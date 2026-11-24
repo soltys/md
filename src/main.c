@@ -446,6 +446,7 @@ static const char *const HELP[][2] = {
     {NULL, NULL},
     {NULL, "Preview"},
     {"Wheel, PgUp / PgDn", "Scroll (the editor follows)"},
+    {"Scroll bar", "Drag the thumb, click above / below for a page"},
     {"Shift+wheel", "Scroll a wide code block sideways"},
     {"Space, Home / End", "A page down, to the start / end"},
     {"j / k", "A line down / up (5j: five lines)"},
@@ -1131,7 +1132,8 @@ static void viewer_hover(float x, float y)
     if (view_hover(&app.view, inside ? vx : -1, vy)) app.dirty = true;
     const char *url;
     size_t len;
-    set_hand_cursor(inside && (app.view.hover_button || app.view.hover_font_button ||
+    set_hand_cursor(inside && !app.view.hover_scrollbar &&
+                    (app.view.hover_button || app.view.hover_font_button ||
                                view_link_at(&app.view, vx, vy, &url, &len)));
 }
 
@@ -1480,6 +1482,12 @@ static bool handle_event(const SDL_Event *e)
         to_pixels(&x, &y);
         bool down = e->type == SDL_EVENT_MOUSE_BUTTON_DOWN;
         float vx = x - app.viewer_rect.x, vy = y - app.viewer_rect.y;
+        if (e->button.button == SDL_BUTTON_LEFT && !down && app.view.scrollbar_drag) {
+            view_scrollbar_release(&app.view);
+            viewer_hover(x, y);
+            app.dirty = true;
+            break;
+        }
         if (e->button.button == SDL_BUTTON_LEFT && !down && app.selecting) {
             /* A click (no drag) on a link opens it; otherwise it just
              * clears the selection. */
@@ -1498,7 +1506,10 @@ static bool handle_event(const SDL_Event *e)
         const bool left_in_viewer = down && e->button.button == SDL_BUTTON_LEFT && viewer_visible() &&
                                     in_rect(&app.viewer_rect, x, y);
         int copy_item = left_in_viewer ? view_copy_button_at(&app.view, vx, vy) : -1;
-        if (left_in_viewer && view_font_button_at(&app.view, vx, vy)) {
+        if (left_in_viewer && view_scrollbar_press(&app.view, vx, vy)) {
+            app.viewer_scrolled = true;
+            app.dirty = true;
+        } else if (left_in_viewer && view_font_button_at(&app.view, vx, vy)) {
             toggle_serif();
         } else if (copy_item >= 0) {
             copy_code_block(copy_item);
@@ -1533,6 +1544,14 @@ static bool handle_event(const SDL_Event *e)
         break;
     }
     case SDL_EVENT_MOUSE_MOTION:
+        if (app.view.scrollbar_drag) {
+            float x = e->motion.x, y = e->motion.y;
+            to_pixels(&x, &y);
+            view_scrollbar_drag(&app.view, y - app.viewer_rect.y);
+            app.viewer_scrolled = true;
+            app.dirty = true;
+            break;
+        }
         if (viewer_visible()) {
             float x = e->motion.x, y = e->motion.y;
             to_pixels(&x, &y);

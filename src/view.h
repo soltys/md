@@ -94,6 +94,12 @@ typedef struct View {
     bool hover_font_button;
     TTF_Text *icon_font;
     bool icon_font_serif;     /* which face icon_font was made with */
+    /* Overlay scroll bar on the right edge: thin, wider while the mouse is
+     * near it or its thumb is being dragged. */
+    bool hover_scrollbar;
+    bool scrollbar_drag;
+    float scrollbar_grab;     /* mouse y minus thumb top, while dragging */
+    bool exporting;           /* drawing for F12: no scroll bar */
 } View;
 
 void view_init(View *v, TTF_TextEngine *engine, const Theme *theme);
@@ -151,6 +157,13 @@ bool view_font_button_at(View *v, float x, float y);
 bool view_link_at(View *v, float x, float y, const char **url, size_t *len);
 
 void view_draw(View *v, SDL_Renderer *r);
+/* Scroll bar, in viewport pixels. view_scrollbar_press() returns false when
+ * (x, y) is not on the bar; on the thumb it starts a drag, on the track it
+ * pages towards the mouse. */
+bool view_scrollbar_at(View *v, float x, float y);
+bool view_scrollbar_press(View *v, float x, float y);
+void view_scrollbar_drag(View *v, float y);
+void view_scrollbar_release(View *v);
 /* Lays out the whole document now (which also requests every image). */
 void view_layout_all(View *v);
 /* Draws the whole document into a new surface (F12, save as PNG). On
