@@ -8,8 +8,8 @@
  * captioned, resizable window, md only moves the client area up over the
  * system caption (WM_NCCALCSIZE) and tells Windows what is under the mouse
  * (WM_NCHITTEST). So dragging, Aero Snap, double-click to maximize, the
- * system menu, the Windows 11 Snap Layouts flyout on the maximize button,
- * rounded corners, the shadow and the resize borders all stay native.
+ * system menu (right-click or Alt+Space), the Windows 11 Snap Layouts
+ * flyout on the maximize button, rounded corners, the shadow and the resize borders all stay native.
  *
  * On other platforms (the Linux sanity build) the system title bar stays
  * and chrome_height() is 0. */
@@ -31,9 +31,10 @@ float chrome_height(void);
 /* Light / dark window frame (border, shadow, system menu). */
 void chrome_set_dark(bool dark);
 
-/* Draws the bar across the top of the window, height pixels tall. title is
- * the document name (or NULL); active is whether the window has focus. */
-void chrome_draw(SDL_Renderer *r, TTF_TextEngine *engine, const Theme *th, const char *title,
-                 bool active, float width, float height, float scale);
+/* Draws the bar across the top of the window, height pixels tall: just
+ * the caption buttons, no title or icon (the taskbar still shows the file
+ * name). active is whether the window has focus. */
+void chrome_draw(SDL_Renderer *r, TTF_TextEngine *engine, const Theme *th, bool active,
+                 float width, float height, float scale);
 
 #endif

@@ -5,7 +5,6 @@
  * are those of the Windows 11 caption buttons. */
 #define BAR_H 32.0f
 #define BUTTON_W 46.0f
-#define ICON_W 40.0f
 #define RESIZE_BAND 5.0f /* top edge that still resizes (restored window) */
 
 enum { BTN_NONE, BTN_MIN, BTN_MAX, BTN_CLOSE };
@@ -14,7 +13,6 @@ static SDL_Window *win;
 static int hover, pressed; /* BTN_* under the mouse / held down */
 
 static int button_px(float s) { return (int)(BUTTON_W * s + 0.5f); }
-static int icon_px(float s) { return (int)(ICON_W * s + 0.5f); }
 
 #ifdef _WIN32
 static int bar_px(float s) { return (int)(BAR_H * s + 0.5f); }
@@ -96,7 +94,6 @@ static LRESULT hit_test(HWND h, LPARAM lp, LRESULT def)
     case BTN_CLOSE: return HTCLOSE;
     default: break;
     }
-    if (pt.x < icon_px(s)) return HTSYSMENU;
     return HTCAPTION;
 }
 
@@ -235,7 +232,7 @@ typedef struct CachedText {
     char str[256];
 } CachedText;
 
-enum { TXT_ICON, TXT_TITLE, TXT_MIN, TXT_MAX, TXT_CLOSE, TXT_COUNT };
+enum { TXT_MIN, TXT_MAX, TXT_CLOSE, TXT_COUNT };
 static CachedText texts[TXT_COUNT];
 
 static TTF_Text *cached(int slot, TTF_TextEngine *engine, TTF_Font *font, const char *s)
@@ -264,10 +261,9 @@ static void draw_centered(TTF_Text *t, SDL_Color c, const SDL_FRect *box)
 #define GLYPH_MAXIMIZE "\xEE\xAA\xB9" /* U+EAB9 chrome-maximize */
 #define GLYPH_RESTORE  "\xEE\xAA\xBB" /* U+EABB chrome-restore */
 #define GLYPH_CLOSE    "\xEE\xAA\xB8" /* U+EAB8 chrome-close */
-#define GLYPH_MARKDOWN "\xEE\x9C\xBE" /* U+E73E dev-markdown */
 
-void chrome_draw(SDL_Renderer *r, TTF_TextEngine *engine, const Theme *th, const char *title,
-                 bool active, float width, float height, float scale)
+void chrome_draw(SDL_Renderer *r, TTF_TextEngine *engine, const Theme *th, bool active,
+                 float width, float height, float scale)
 {
     if (height <= 0) return;
     SDL_SetRenderDrawBlendMode(r, SDL_BLENDMODE_BLEND);
@@ -304,29 +300,5 @@ void chrome_draw(SDL_Renderer *r, TTF_TextEngine *engine, const Theme *th, const
         if (!glyphs) continue;
         const char *g = b == BTN_MAX && maximized ? GLYPH_RESTORE : GLYPH[b];
         draw_centered(cached(TXT_MIN + b - BTN_MIN, engine, glyphs, g), glyph_c, &box);
-    }
-    if (!glyphs) return;
-
-    const float icon_w = (float)icon_px(scale);
-    SDL_FRect icon_box = {0, 0, icon_w, height - line_h};
-    TTF_Font *icon_font = fonts_get(FONT_MONO, 24.0f * scale);
-    if (icon_font) {
-        draw_centered(cached(TXT_ICON, engine, icon_font, GLYPH_MARKDOWN),
-                      active ? th->accent : th->muted, &icon_box);
-    }
-
-    TTF_Font *title_font = fonts_get(FONT_REGULAR, 13.0f * scale);
-    const float title_end = width - 3 * bw - 8 * scale;
-    if (title_font && title_end > icon_w) {
-        TTF_Text *t = cached(TXT_TITLE, engine, title_font, title && title[0] ? title : "md");
-        if (t) {
-            int tw = 0, tht = 0;
-            TTF_GetTextSize(t, &tw, &tht);
-            SDL_Rect clip = {(int)icon_w, 0, (int)(title_end - icon_w), (int)height};
-            SDL_SetRenderClipRect(r, &clip);
-            TTF_SetTextColor(t, fg.r, fg.g, fg.b, 0xFF);
-            TTF_DrawRendererText(t, icon_w, SDL_floorf((height - line_h - (float)tht) * 0.5f));
-            SDL_SetRenderClipRect(r, NULL);
-        }
     }
 }
