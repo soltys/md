@@ -15,6 +15,7 @@
 #include <SDL3_image/SDL_image.h>
 
 #include "app.h"
+#include "chrome.h"
 #include "cli.h"
 #include "clipboard.h"
 #include "document.h"
@@ -37,6 +38,16 @@ static int SDLCALL font_thread_main(void *unused)
     (void)unused;
     TIMING_THREAD("fonts");
     return fonts_init(16.0f, start_serif) ? 0 : -1;
+}
+
+/* From the window procedure: a title bar button changed its look. */
+static void chrome_changed(void)
+{
+    SDL_Event ev;
+    SDL_zero(ev);
+    ev.type = app.wake_event;
+    ev.user.code = 3;
+    SDL_PushEvent(&ev);
 }
 
 static void wake_main_thread(void)
@@ -181,7 +192,10 @@ static void relayout(void)
     int w = 0, h = 0;
     SDL_GetRenderOutputSize(app.renderer, &w, &h);
     float scale = display_scale();
-    SDL_FRect full = {0, 0, (float)w, (float)h};
+    /* The panes go under md's own title bar (none on other platforms). */
+    const float top = chrome_height();
+    const float ph = SDL_max(0.0f, (float)h - top);
+    SDL_FRect full = {0, top, (float)w, ph};
     SDL_FRect none = {0, 0, 0, 0};
 
     if (editor_visible() && viewer_visible()) {
@@ -189,12 +203,12 @@ static void relayout(void)
         SDL_FRect first, second;
         if (app.vertical) {
             float half = SDL_floorf((float)w * 0.5f);
-            first = (SDL_FRect){0, 0, half, (float)h};
-            second = (SDL_FRect){half + gap, 0, (float)w - half - gap, (float)h};
+            first = (SDL_FRect){0, top, half, ph};
+            second = (SDL_FRect){half + gap, top, (float)w - half - gap, ph};
         } else {
-            float half = SDL_floorf((float)h * 0.5f);
-            first = (SDL_FRect){0, 0, (float)w, half};
-            second = (SDL_FRect){0, half + gap, (float)w, (float)h - half - gap};
+            float half = SDL_floorf(ph * 0.5f);
+            first = (SDL_FRect){0, top, (float)w, half};
+            second = (SDL_FRect){0, top + half + gap, (float)w, ph - half - gap};
         }
         app.editor_rect = app.editor_second ? second : first;
         app.viewer_rect = app.editor_second ? first : second;
@@ -241,6 +255,8 @@ static void update_title(void)
             if (*p == '/' || *p == '\\') name = p + 1;
         }
     }
+    SDL_strlcpy(app.title, name ? name : "", sizeof app.title);
+    app.dirty = true;
     char *title = NULL;
     if (name) SDL_asprintf(&title, "%s - " APP_NAME, name);
     SDL_SetWindowTitle(app.window, title ? title : APP_NAME);
@@ -574,6 +590,17 @@ static void report_first_render(void)
 }
 #endif
 
+static void draw_chrome(SDL_Renderer *r)
+{
+    const float h = chrome_height();
+    if (h <= 0) return;
+    int w = 0, oh = 0;
+    SDL_GetRenderOutputSize(r, &w, &oh);
+    const bool active = (SDL_GetWindowFlags(app.window) & SDL_WINDOW_INPUT_FOCUS) != 0;
+    chrome_draw(r, app.fonts_ok ? app.engine : NULL, &app.view.theme, app.title, active,
+                (float)w, h, display_scale());
+}
+
 static void render(void)
 {
 #if MD_TIMING
@@ -622,6 +649,7 @@ static void render(void)
         }
         SDL_SetRenderViewport(r, NULL);
     }
+    draw_chrome(r);
     draw_search_bar(r);
     draw_help(r);
     draw_toast(r);
@@ -1197,6 +1225,7 @@ static void set_dark(bool dark)
 {
     if (dark == app.dark || !app.fonts_ok) return;
     app.dark = dark;
+    chrome_set_dark(dark);
     /* Colours are baked into texts at creation; rebuild them. */
     Document *doc = app.view.doc;
     app.view.doc = NULL;
@@ -1544,6 +1573,10 @@ static bool handle_event(const SDL_Event *e)
         relayout();
         break;
     case SDL_EVENT_WINDOW_EXPOSED:
+    case SDL_EVENT_WINDOW_FOCUS_GAINED: /* the title bar dims when inactive */
+    case SDL_EVENT_WINDOW_FOCUS_LOST:
+    case SDL_EVENT_WINDOW_MAXIMIZED:    /* maximize / restore button glyph */
+    case SDL_EVENT_WINDOW_RESTORED:
         app.dirty = true;
         break;
     case SDL_EVENT_WINDOW_MOUSE_LEAVE:
@@ -1551,6 +1584,7 @@ static bool handle_event(const SDL_Event *e)
         break;
     case SDL_EVENT_SYSTEM_THEME_CHANGED: {
         if (!app.theme_forced) set_dark(SDL_GetSystemTheme() == SDL_SYSTEM_THEME_DARK);
+        chrome_set_dark(app.dark); /* SDL resets the frame to the system theme */
         break;
     }
     default:
@@ -1561,6 +1595,8 @@ static bool handle_event(const SDL_Event *e)
             } else if (e->user.code == 2 && e->user.data1) { /* save dialog: F12 */
                 save_png(e->user.data1);
                 SDL_free(e->user.data1);
+            } else if (e->user.code == 3) { /* title bar button hovered / pressed */
+                app.dirty = true;
             }
             if (app.toast[0] && SDL_GetTicks() >= app.toast_until) app.dirty = true;
             take_loaded_document();
@@ -1647,7 +1683,8 @@ int main(int argc, char **argv)
         SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, APP_NAME, SDL_GetError(), NULL);
         return 1;
     }
-    TIMING_MARK("create window (hidden)");
+    chrome_init(app.window, app.dark, chrome_changed);
+    TIMING_MARK("create window (hidden), take over its title bar");
     app.renderer = SDL_CreateRenderer(app.window, renderer_name);
     if (!app.renderer && renderer_name) {
         TIMING_MARK("renderer '%s' failed, using the default", renderer_name);

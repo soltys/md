@@ -51,6 +51,17 @@ follows as you type.
 Everything else typed in the editor goes to Neovim. Closing the window asks
 Neovim to quit, so unsaved changes are never lost silently.
 
+## Window
+
+On Windows md draws its own title bar in the theme's colours (it follows `F8`):
+the Markdown icon, the file name, and minimize / maximize / close buttons in the
+Windows 11 style (the close button turns red on hover). It is still a normal
+Windows window underneath, so everything native keeps working: drag the bar to
+move, double-click it to maximize, drag to a screen edge to snap, hover the
+maximize button for **Snap Layouts**, right-click the bar (or click the icon) for
+the system menu, resize from any edge, rounded corners and the shadow. The
+title fades when the window is not focused.
+
 ## Front matter
 
 The YAML block between the `---` lines at the very top of this file is

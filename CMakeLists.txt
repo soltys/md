@@ -42,6 +42,8 @@ include(Grammars)
 add_executable(md WIN32
     src/main.c
     src/app.h
+    src/chrome.c
+    src/chrome.h
     src/assets.c
     src/assets.h
     src/asset_ids.h

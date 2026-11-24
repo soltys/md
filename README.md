@@ -281,6 +281,10 @@ see its README.
 9. DLLs that are not needed for the first frame (shell32, ole32, setupapi,
    ...) are delay-loaded, so Windows does not load them before `main()`.
 10. The window is DPI-aware through the manifest, so it opens at the right size.
+11. md's own title bar costs nothing extra: the window procedure is wrapped
+    and the frame recomputed while the window is still hidden, and the bar is
+    drawn in the same frame as the page (its background even before the fonts
+    are in). `dwmapi.dll` is not imported; SDL has already loaded it.
 
 Which renderer starts fastest depends on the GPU driver. md uses SDL's
 default (Direct3D 11 on Windows); `--renderer=NAME` or the `MD_RENDERER`
