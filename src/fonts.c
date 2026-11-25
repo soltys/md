@@ -59,8 +59,7 @@ static int emoji_count;
 
 /* Hinting for the proportional faces (Roboto, Roboto Serif) and the symbol
  * fallbacks. None: glyphs are drawn from the outlines as designed, with the
- * softest anti-aliasing, as macOS and Chrome's grayscale text do (
- * asked for more anti-aliasing). Light snaps heights (baseline, x-height)
+ * softest anti-aliasing, as macOS and Chrome's grayscale text do. Light snaps heights (baseline, x-height)
  * to pixels: a little sharper, a little harder. Full ("normal") hinting also
  * squeezes every glyph and its advance onto whole pixels; Roboto Serif and
  * the Nerd Font have no hints of their own, so FreeType's auto-hinter does
