@@ -153,7 +153,8 @@ unsaved changes are never dropped silently.
 * Tables with column alignment and inline formatting in cells
 * YAML front matter shown as a highlighted YAML block (see docs/features.md)
 * Images (PNG, JPG, GIF, BMP, SVG, QOI, ...) loaded in the background,
-  relative to the document; remote images show their alt text
+  relative to the document; http/https images are downloaded in the
+  background (alt text shows until they arrive or if the download fails)
 * Emoji including ZWJ sequences, skin tones, flags and keycaps
   (Noto Color Emoji)
 * Fenced code with syntax highlighting (tree-sitter) for C, C++, C#, Python,

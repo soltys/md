@@ -131,6 +131,8 @@ if(WIN32)
     target_sources(md PRIVATE
         "${CMAKE_CURRENT_BINARY_DIR}/generated/assets.rc"
         src/md.manifest)
+    # Remote images are downloaded with WinHTTP (delay-loaded below).
+    target_link_libraries(md PRIVATE winhttp)
 else()
     # Dev-only fallback: load the fonts from the download directory.
     target_compile_definitions(md PRIVATE
@@ -168,7 +170,7 @@ if(MSVC)
     target_link_options(md PRIVATE
         /DELAYLOAD:shell32.dll /DELAYLOAD:ole32.dll /DELAYLOAD:oleaut32.dll
         /DELAYLOAD:setupapi.dll /DELAYLOAD:cfgmgr32.dll /DELAYLOAD:version.dll
-        /DELAYLOAD:winmm.dll /IGNORE:4199)
+        /DELAYLOAD:winmm.dll /DELAYLOAD:winhttp.dll /IGNORE:4199)
     target_link_libraries(md PRIVATE delayimp)
 else()
     target_compile_options(md PRIVATE -Wall -Wextra -Wno-unused-parameter)

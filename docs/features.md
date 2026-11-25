@@ -253,9 +253,14 @@ relative to the Markdown file:
 
 ![md logo](md-logo.svg)
 
-Remote images are not downloaded; their alt text is shown instead:
+Remote `http://` and `https://` images are downloaded in the background
+(WinHTTP, using the system proxy settings). The alt text shows until the
+image arrives, and stays if the download fails or the server does not answer
+with an image:
 
-![remote image](https://example.com/image.png)
+![md folder sprite](https://raw.githubusercontent.com/soltys/md/main/art/png/folder@3x.png)
+
+![remote image that does not exist](https://example.com/image.png)
 
 ## Horizontal rule
 
