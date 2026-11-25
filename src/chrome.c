@@ -1,4 +1,5 @@
 #include "chrome.h"
+#include "text.h"
 #include "fonts.h"
 
 /* Layout of the bar, in logical pixels (times the DPI scale). The sizes
@@ -252,7 +253,7 @@ static void draw_centered(TTF_Text *t, SDL_Color c, const SDL_FRect *box)
     int w = 0, h = 0;
     TTF_GetTextSize(t, &w, &h);
     TTF_SetTextColor(t, c.r, c.g, c.b, c.a);
-    TTF_DrawRendererText(t, box->x + SDL_floorf((box->w - (float)w) * 0.5f),
+    md_text_draw(t, box->x + SDL_floorf((box->w - (float)w) * 0.5f),
                          box->y + SDL_floorf((box->h - (float)h) * 0.5f));
 }
 

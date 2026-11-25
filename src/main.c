@@ -14,6 +14,7 @@
 #include <SDL3_ttf/SDL_ttf.h>
 #include <SDL3_image/SDL_image.h>
 
+#include "text.h"
 #include "app.h"
 #include "chrome.h"
 #include "cli.h"
@@ -371,7 +372,7 @@ static void draw_search_bar(SDL_Renderer *r)
     TTF_GetTextSize(t, &tw, &tht);
     const float x = bar.x + 12.0f * s, y = bar.y + SDL_floorf((h - (float)tht) * 0.5f);
     TTF_SetTextColor(t, th->text.r, th->text.g, th->text.b, 0xFF);
-    TTF_DrawRendererText(t, x, y);
+    md_text_draw(t, x, y);
     TTF_DestroyText(t);
     SDL_FRect caret = {x + (float)tw + 1.0f, y, SDL_max(2.0f, SDL_floorf(2.0f * s)), (float)tht};
     SDL_SetRenderDrawColor(r, th->accent.r, th->accent.g, th->accent.b, 0xFF);
@@ -382,7 +383,7 @@ static void draw_search_bar(SDL_Renderer *r)
             int mw = 0, mh = 0;
             TTF_GetTextSize(m, &mw, &mh);
             TTF_SetTextColor(m, th->muted.r, th->muted.g, th->muted.b, 0xFF);
-            TTF_DrawRendererText(m, bar.x + bar.w - (float)mw - 12.0f * s, y);
+            md_text_draw(m, bar.x + bar.w - (float)mw - 12.0f * s, y);
             TTF_DestroyText(m);
         }
     }
@@ -416,7 +417,7 @@ static void draw_toast(SDL_Renderer *r)
     SDL_RenderFillRect(r, &box);
     if (app.dark) TTF_SetTextColor(text, 0x1E, 0x1E, 0x2E, 0xFF);
     else TTF_SetTextColor(text, 0xFF, 0xFF, 0xFF, 0xFF);
-    TTF_DrawRendererText(text, box.x + pad_x, box.y + pad_y);
+    md_text_draw(text, box.x + pad_x, box.y + pad_y);
     TTF_DestroyText(text);
 }
 
@@ -472,7 +473,7 @@ static void help_draw_text(TTF_Font *font, const char *s, SDL_Color c, float x, 
     TTF_Text *t = TTF_CreateText(app.engine, font, s, 0);
     if (!t) return;
     TTF_SetTextColor(t, c.r, c.g, c.b, 0xFF);
-    TTF_DrawRendererText(t, x, y);
+    md_text_draw(t, x, y);
     TTF_DestroyText(t);
 }
 
@@ -1750,7 +1751,7 @@ int main(int argc, char **argv)
         SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, APP_NAME,
                                  "Could not load the embedded fonts.", app.window);
     } else {
-        app.engine = TTF_CreateRendererTextEngine(app.renderer);
+        app.engine = md_text_engine_create(app.renderer);
     }
     view_init(&app.view, app.engine, theme);
     app.view.serif = opts.serif;
@@ -1811,7 +1812,7 @@ int main(int argc, char **argv)
     SDL_free(app.preview_pending_name);
     SDL_free(app.preview_pending_text);
     images_shutdown();
-    if (app.engine) TTF_DestroyRendererTextEngine(app.engine);
+    if (app.engine) md_text_engine_destroy(app.engine);
     if (app.fonts_ok) fonts_shutdown();
     SDL_DestroyRenderer(app.renderer);
     SDL_DestroyWindow(app.window);

@@ -1,6 +1,7 @@
 #include "fonts.h"
 #include "assets.h"
 #include "timing.h"
+#include "text.h"
 
 #include <SDL3/SDL.h>
 
@@ -81,7 +82,10 @@ static TTF_Font *open_asset(int asset, float px, TTF_HintingFlags hinting)
     if (!io) return NULL;
     TTF_Font *font = TTF_OpenFontIO(io, true, px);
     /* Set before any glyph is loaded, so no cache is flushed. */
-    if (font) TTF_SetFontHinting(font, hinting);
+    if (font) {
+        TTF_SetFontHinting(font, hinting);
+        md_text_register_font(font, data, size, px, hinting);
+    }
     return font;
 }
 

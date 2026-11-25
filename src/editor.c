@@ -1,4 +1,5 @@
 #include "editor.h"
+#include "text.h"
 #include "fonts.h"
 #include "emoji.h"
 
@@ -212,7 +213,7 @@ void editor_draw(Editor *ed, SDL_Renderer *r, const SDL_FRect *rect, bool focuse
         }
 
         EdRow *er = &ed->rows[row];
-        for (int i = 0; i < er->count; ++i) TTF_DrawRendererText(er->runs[i].text, ox + er->runs[i].x, y);
+        for (int i = 0; i < er->count; ++i) md_text_draw(er->runs[i].text, ox + er->runs[i].x, y);
     }
 
     /* Cursor. */
@@ -249,7 +250,7 @@ void editor_draw(Editor *ed, SDL_Renderer *r, const SDL_FRect *rect, bool focuse
             }
             SDL_Color k = rgb(cur_fg);
             TTF_SetTextColor(ed->cursor_text, k.r, k.g, k.b, 0xFF);
-            TTF_DrawRendererText(ed->cursor_text, x0, y0);
+            md_text_draw(ed->cursor_text, x0, y0);
         }
     }
 }

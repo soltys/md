@@ -1,4 +1,5 @@
 #include "view.h"
+#include "text.h"
 #include "emoji.h"
 #include "fonts.h"
 
@@ -395,6 +396,7 @@ static float layout_text(View *v, Para *out, uint32_t text_off, uint32_t len,
         /* Place fragments. */
         x = 0;
         Frag *cur = NULL;
+        const int line_first_frag = out ? v->frag_count : 0;
         for (int k = line_start; k < end; ++k) {
             Tok *t = &toks[k];
             if (out) {
@@ -435,6 +437,24 @@ static float layout_text(View *v, Para *out, uint32_t text_off, uint32_t len,
                 }
             }
             x += t->w;
+        }
+        if (out) {
+            /* A merged fragment is drawn as one string, which is a pixel or
+             * two wider than the sum of its tokens: each token's width is
+             * rounded down, and without full hinting advances are
+             * fractional. Use the drawn width, so the next fragment does
+             * not overlap this one (spaces vanished before "italic"). */
+            float shift = 0;
+            for (int k = line_first_frag; k < v->frag_count; ++k) {
+                Frag *f = &v->frags[k];
+                f->x += shift;
+                if (f->img || f->len == 0) continue;
+                const float real = (float)text_width(f->font, v->doc->strings + f->str, f->len) +
+                                   f->pad_l + f->pad_r;
+                shift += real - f->w;
+                f->w = real;
+            }
+            x += shift;
         }
         /* Do not count trailing spaces in the width. */
         float w = x;
@@ -988,7 +1008,7 @@ static void draw_para(View *v, SDL_Renderer *r, const Para *p, float ox, float o
          * (display scales like 125% / 150%, table cells) the GPU can pick
          * texels of the neighbouring glyph (stray marks above letters) or
          * drop a row (the dot of an i). */
-        if (f->text) TTF_DrawRendererText(f->text, SDL_roundf(x + f->pad_l), SDL_roundf(y));
+        if (f->text) md_text_draw(f->text, SDL_roundf(x + f->pad_l), SDL_roundf(y));
         if (f->style & ST_STRIKE) {
             float asc = (float)TTF_GetFontAscent(f->font);
             SDL_FRect line = {x, y + asc * 0.68f, f->w, SDL_max(1.0f, SDL_floorf(s))};
@@ -1094,7 +1114,7 @@ static void draw_copy_button(View *v, SDL_Renderer *r, const ViewItem *it, int i
     TTF_SetTextColor(*slot, c.r, c.g, c.b, 0xFF);
     int tw = 0, tht = 0;
     TTF_GetTextSize(*slot, &tw, &tht);
-    TTF_DrawRendererText(*slot, SDL_roundf(bt.x + (bt.w - (float)tw) * 0.5f),
+    md_text_draw(*slot, SDL_roundf(bt.x + (bt.w - (float)tw) * 0.5f),
                          SDL_roundf(bt.y + (bt.h - (float)tht) * 0.5f));
 }
 
@@ -1138,7 +1158,7 @@ static void draw_font_button(View *v, SDL_Renderer *r)
     TTF_SetTextColor(v->icon_font, c.r, c.g, c.b, 0xFF);
     int tw = 0, tht = 0;
     TTF_GetTextSize(v->icon_font, &tw, &tht);
-    TTF_DrawRendererText(v->icon_font, SDL_roundf(bt.x + (bt.w - (float)tw) * 0.5f),
+    md_text_draw(v->icon_font, SDL_roundf(bt.x + (bt.w - (float)tw) * 0.5f),
                          SDL_roundf(bt.y + (bt.h - (float)tht) * 0.5f));
 }
 
@@ -1420,6 +1440,9 @@ SDL_Surface *view_render_surface(View *v, SDL_Renderer *r, const char **error)
 
     SDL_SetRenderTarget(r, tex);
     SDL_SetRenderViewport(r, NULL);
+    /* Subpixel text is tuned to the screen's pixels; a picture gets
+     * grayscale anti-aliasing, which looks right anywhere. */
+    md_text_force_grayscale(v->engine, true);
     for (int y = 0; y < h && !*error; y += tile) {
         const int th = SDL_min(tile, h - y);
         set_color(r, v->theme.bg);
@@ -1433,6 +1456,7 @@ SDL_Surface *view_render_surface(View *v, SDL_Renderer *r, const char **error)
         if (!px || !SDL_BlitSurface(px, NULL, out, &dst)) *error = SDL_GetError();
         SDL_DestroySurface(px);
     }
+    md_text_force_grayscale(v->engine, false);
     SDL_SetRenderTarget(r, old_target);
     SDL_SetRenderViewport(r, &old_vp);
     v->scroll = old_scroll;
@@ -1565,8 +1589,8 @@ void view_draw_message(View *v, SDL_Renderer *r, const char *title, const char *
     TTF_GetTextSize(v->msg_title, &tw, &th);
     TTF_GetTextSize(v->msg_body, &bw, &bh);
     float y = SDL_floorf((v->height - (float)(th + bh) - 12 * s) * 0.5f);
-    TTF_DrawRendererText(v->msg_title, SDL_floorf((v->width - (float)tw) * 0.5f), y);
-    TTF_DrawRendererText(v->msg_body, SDL_floorf((v->width - (float)bw) * 0.5f), y + (float)th + 12 * s);
+    md_text_draw(v->msg_title, SDL_floorf((v->width - (float)tw) * 0.5f), y);
+    md_text_draw(v->msg_body, SDL_floorf((v->width - (float)bw) * 0.5f), y + (float)th + 12 * s);
 }
 
 /* ---------------------------------------------------------- selection -- */

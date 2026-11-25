@@ -163,6 +163,11 @@ unsaved changes are never dropped silently.
 * Text is drawn without hinting (the fonts' own shapes and spacing, smooth
   anti-aliasing); code and the editor use full hinting so columns line up.
   `MD_FONT_HINTING=light|normal` makes text sharper
+* Subpixel (ClearType-style) anti-aliasing when ClearType is on in Windows,
+  in the panel's RGB or BGR order: md has its own SDL_ttf text engine
+  (src/text.c) that draws FreeType's LCD glyphs in two blend passes.
+  Grayscale with the software renderer, in F12 pictures, or with
+  `MD_FONT_AA=grayscale` (`subpixel` / `bgr` force it on)
 
 ## ![](art/png/pencil@3x.png) Neovim config
 
@@ -346,6 +351,7 @@ installing.
 | `src/nvim.c`, `src/msgpack.c` | Neovim process and msgpack-RPC UI client |
 | `src/editor.c` | Draws Neovim's grid |
 | `src/fonts.c`, `src/assets.c` | Embedded fonts (zstd-compressed RCDATA, unpacked on first use) and font cache |
+| `src/text.c` | Text engine for SDL_ttf: glyph atlas, subpixel (LCD) glyphs drawn in two blend passes |
 | `src/emoji.c`, `src/images.c` | Emoji clustering, async image loading |
 | `art/` | PICO-8 sprite sheets and the PNGs generated from them by [pixelart](https://github.com/soltys/pixelart) |
 

@@ -49,6 +49,8 @@ add_executable(md WIN32
     src/asset_ids.h
     src/fonts.c
     src/fonts.h
+    src/text.c
+    src/text.h
     src/document.c
     src/document.h
     src/view.c
@@ -109,6 +111,7 @@ endif()
 target_link_libraries(md PRIVATE
     SDL3::SDL3-static
     SDL3_ttf::SDL3_ttf-static
+    freetype  # md_text rasterises subpixel glyphs itself (SDL_ttf vendors it)
     SDL3_image::SDL3_image-static
     md_tree_sitter
     md_ts_markdown
