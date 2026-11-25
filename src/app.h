@@ -67,7 +67,7 @@ typedef struct App {
     Uint64 toast_until;  /* SDL_GetTicks() deadline */
 
     bool show_help;      /* F1 overlay */
-    char title[256];     /* document name shown in the title bar */
+    char title[1024];    /* full path of the document, shown in the title bar */
 
     /* Preview search: "/" or "?" then text, Enter / Esc; n / N repeat. */
     bool searching;

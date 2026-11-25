@@ -246,22 +246,20 @@ static void relayout(void)
     app.dirty = true;
 }
 
+static char *absolute_path(const char *path);
+
+/* The full path of the open file, in the title bar and the taskbar. */
 static void update_title(void)
 {
     Document *doc = app.view.doc;
-    const char *name = NULL;
-    if (doc && doc->path && doc->path[0]) {
-        name = doc->path;
-        for (const char *p = doc->path; *p; ++p) {
-            if (*p == '/' || *p == '\\') name = p + 1;
-        }
-    }
-    SDL_strlcpy(app.title, name ? name : "", sizeof app.title);
+    char *path = doc && doc->path && doc->path[0] ? absolute_path(doc->path) : NULL;
+    SDL_strlcpy(app.title, path ? path : "", sizeof app.title);
     app.dirty = true;
     char *title = NULL;
-    if (name) SDL_asprintf(&title, "%s - " APP_NAME, name);
+    if (path) SDL_asprintf(&title, "%s - " APP_NAME, path);
     SDL_SetWindowTitle(app.window, title ? title : APP_NAME);
     SDL_free(title);
+    SDL_free(path);
 }
 
 static void take_loaded_document(void)

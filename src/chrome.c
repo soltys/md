@@ -233,7 +233,7 @@ void chrome_set_dark(bool dark) { (void)dark; }
 typedef struct CachedText {
     TTF_Text *text;
     TTF_Font *font;
-    char str[256];
+    char str[1024];
 } CachedText;
 
 enum { TXT_ICON, TXT_TITLE, TXT_MIN, TXT_MAX, TXT_CLOSE, TXT_COUNT };
@@ -267,6 +267,75 @@ static void draw_centered(TTF_Text *t, SDL_Color c, const SDL_FRect *box)
 #define GLYPH_CLOSE    "\xEE\xAA\xB8" /* U+EAB8 chrome-close */
 #define GLYPH_MARKDOWN "\xEE\x9C\xBE" /* U+E73E dev-markdown */
 
+/* md's own icon (the exe's icon resource), as a texture size pixels
+ * square; NULL elsewhere or on failure. Loaded on first use. */
+static SDL_Texture *icon_texture(SDL_Renderer *r, int size)
+{
+    static SDL_Texture *tex;
+    static int tex_size;
+    if (tex && tex_size == size) return tex;
+    if (tex) SDL_DestroyTexture(tex);
+    tex = NULL;
+    tex_size = size;
+#ifdef _WIN32
+    /* MD_APP_ICON (1) holds 16, 32, 48, 64, 128 and 256 px images. */
+    HICON ico = (HICON)LoadImageW(GetModuleHandleW(NULL), MAKEINTRESOURCEW(1), IMAGE_ICON,
+                                  size, size, LR_DEFAULTCOLOR);
+    if (!ico) return NULL;
+    ICONINFO info;
+    if (GetIconInfo(ico, &info)) {
+        SDL_Surface *surf = SDL_CreateSurface(size, size, SDL_PIXELFORMAT_ARGB8888);
+        HDC dc = GetDC(NULL);
+        BITMAPINFO bi;
+        SDL_zero(bi);
+        bi.bmiHeader.biSize = sizeof bi.bmiHeader;
+        bi.bmiHeader.biWidth = size;
+        bi.bmiHeader.biHeight = -size; /* top-down */
+        bi.bmiHeader.biPlanes = 1;
+        bi.bmiHeader.biBitCount = 32;
+        bi.bmiHeader.biCompression = BI_RGB;
+        if (surf && dc && info.hbmColor && surf->pitch == size * 4 &&
+            GetDIBits(dc, info.hbmColor, 0, (UINT)size, surf->pixels, &bi, DIB_RGB_COLORS) == size) {
+            tex = SDL_CreateTextureFromSurface(r, surf);
+            /* Pixel art: keep the pixels square. */
+            if (tex) SDL_SetTextureScaleMode(tex, SDL_SCALEMODE_NEAREST);
+        }
+        if (dc) ReleaseDC(NULL, dc);
+        SDL_DestroySurface(surf);
+        if (info.hbmColor) DeleteObject(info.hbmColor);
+        if (info.hbmMask) DeleteObject(info.hbmMask);
+    }
+    DestroyIcon(ico);
+#else
+    (void)r;
+#endif
+    return tex;
+}
+
+/* The end of s, after "…", that fits in room pixels: a long path keeps its
+ * file name. Returns s itself when it fits. */
+static const char *fit_title(TTF_Font *font, const char *s, float room)
+{
+    /* Measured again only when the title, font or room changes. */
+    static char buf[1024 + 4], last[1024];
+    static TTF_Font *last_font;
+    static float last_room = -1;
+    if (font == last_font && room == last_room && SDL_strcmp(s, last) == 0) return buf;
+    last_font = font;
+    last_room = room;
+    SDL_strlcpy(last, s, sizeof last);
+    SDL_strlcpy(buf, s, sizeof buf);
+    int w = 0, h = 0;
+    if (!TTF_GetStringSize(font, s, 0, &w, &h) || (float)w <= room) return buf;
+    for (const char *p = s + 1; *p; ++p) {
+        if (((unsigned char)*p & 0xC0) == 0x80) continue; /* inside a UTF-8 sequence */
+        SDL_snprintf(buf, sizeof buf, "\xE2\x80\xA6%s", p);
+        if (TTF_GetStringSize(font, buf, 0, &w, &h) && (float)w <= room) return buf;
+    }
+    SDL_strlcpy(buf, "\xE2\x80\xA6", sizeof buf);
+    return buf;
+}
+
 void chrome_draw(SDL_Renderer *r, TTF_TextEngine *engine, const Theme *th, const char *title,
                  bool active, float width, float height, float scale)
 {
@@ -285,7 +354,9 @@ void chrome_draw(SDL_Renderer *r, TTF_TextEngine *engine, const Theme *th, const
     const SDL_Color white = {0xFF, 0xFF, 0xFF, 0xFF};
     const float bw = (float)button_px(scale);
     const bool maximized = win && (SDL_GetWindowFlags(win) & SDL_WINDOW_MAXIMIZED);
-    TTF_Font *glyphs = fonts_get(FONT_MONO, 16.0f * scale);
+    /* Through Roboto: its Nerd Font fallback is unhinted, and hinting
+     * flattens these thin-line icons. */
+    TTF_Font *glyphs = fonts_get(FONT_REGULAR, 16.0f * scale);
     static const char *const GLYPH[] = {NULL, GLYPH_MINIMIZE, GLYPH_MAXIMIZE, GLYPH_CLOSE};
 
     for (int b = BTN_MIN; b <= BTN_CLOSE; ++b) {
@@ -310,8 +381,17 @@ void chrome_draw(SDL_Renderer *r, TTF_TextEngine *engine, const Theme *th, const
 
     const float icon_w = (float)icon_px(scale);
     SDL_FRect icon_box = {0, 0, icon_w, height - line_h};
-    TTF_Font *icon_font = fonts_get(FONT_MONO, 24.0f * scale);
-    if (icon_font) {
+    /* 16 px per whole step of scale: exact images from the icon, crisp. */
+    const int icon_size = 16 * SDL_max(1, (int)(scale + 0.5f));
+    SDL_Texture *icon = icon_texture(r, icon_size);
+    TTF_Font *icon_font = icon ? NULL : fonts_get(FONT_REGULAR, 24.0f * scale);
+    if (icon) {
+        SDL_FRect dst = {SDL_floorf((icon_w - (float)icon_size) * 0.5f),
+                         SDL_floorf((height - line_h - (float)icon_size) * 0.5f),
+                         (float)icon_size, (float)icon_size};
+        SDL_SetTextureAlphaModFloat(icon, active ? 1.0f : 0.6f);
+        SDL_RenderTexture(r, icon, NULL, &dst);
+    } else if (icon_font) {
         draw_centered(cached(TXT_ICON, engine, icon_font, GLYPH_MARKDOWN),
                       active ? th->accent : th->muted, &icon_box);
     }
@@ -319,14 +399,16 @@ void chrome_draw(SDL_Renderer *r, TTF_TextEngine *engine, const Theme *th, const
     TTF_Font *title_font = fonts_get(FONT_REGULAR, 13.0f * scale);
     const float title_end = width - 3 * bw - 8 * scale;
     if (title_font && title_end > icon_w) {
-        TTF_Text *t = cached(TXT_TITLE, engine, title_font, title && title[0] ? title : "md");
+        const char *full = title && title[0] ? title : "md";
+        TTF_Text *t = cached(TXT_TITLE, engine, title_font,
+                             fit_title(title_font, full, title_end - icon_w));
         if (t) {
             int tw = 0, tht = 0;
             TTF_GetTextSize(t, &tw, &tht);
             SDL_Rect clip = {(int)icon_w, 0, (int)(title_end - icon_w), (int)height};
             SDL_SetRenderClipRect(r, &clip);
             TTF_SetTextColor(t, fg.r, fg.g, fg.b, 0xFF);
-            TTF_DrawRendererText(t, icon_w, SDL_floorf((height - line_h - (float)tht) * 0.5f));
+            md_text_draw(t, icon_w, SDL_floorf((height - line_h - (float)tht) * 0.5f));
             SDL_SetRenderClipRect(r, NULL);
         }
     }
