@@ -792,8 +792,7 @@ void view_destroy(View *v)
     if (v->msg_body) TTF_DestroyText(v->msg_body);
     if (v->icon_copy) TTF_DestroyText(v->icon_copy);
     if (v->icon_check) TTF_DestroyText(v->icon_check);
-    if (v->icon_font) TTF_DestroyText(v->icon_font);
-    v->icon_copy = v->icon_check = v->icon_font = NULL;
+    v->icon_copy = v->icon_check = NULL;
     v->doc = NULL;
 }
 
@@ -1118,50 +1117,6 @@ static void draw_copy_button(View *v, SDL_Renderer *r, const ViewItem *it, int i
                          SDL_roundf(bt.y + (bt.h - (float)tht) * 0.5f));
 }
 
-/* The "Aa" font button, top-right corner of the viewport (it does not
- * scroll). In viewport coordinates. */
-static SDL_FRect font_button_rect(const View *v)
-{
-    const float s = v->scale;
-    const float size = SDL_roundf(32 * s), margin = SDL_roundf(10 * s);
-    return (SDL_FRect){SDL_roundf(v->width - margin - size), margin, size, size};
-}
-
-bool view_font_button_at(View *v, float x, float y)
-{
-    if (!v->doc || v->doc->error || v->doc->block_count == 0) return false;
-    SDL_FRect bt = font_button_rect(v);
-    return x >= bt.x && x < bt.x + bt.w && y >= bt.y && y < bt.y + bt.h;
-}
-
-/* "Aa" in the face a click switches to, so the button previews it. */
-static void draw_font_button(View *v, SDL_Renderer *r)
-{
-    const Theme *th = &v->theme;
-    SDL_FRect bt = font_button_rect(v);
-    const bool hot = v->hover_font_button;
-    set_color(r, hot ? th->block_button_hover : th->block_button);
-    SDL_RenderFillRect(r, &bt);
-
-    const bool to_serif = !v->serif;
-    TTF_Font *font = fonts_get(to_serif ? FONT_SERIF : FONT_REGULAR, SDL_roundf(17 * v->scale));
-    if (!font) return;
-    if (v->icon_font && v->icon_font_serif != to_serif) {
-        TTF_DestroyText(v->icon_font);
-        v->icon_font = NULL;
-    }
-    if (!v->icon_font) v->icon_font = TTF_CreateText(v->engine, font, "Aa", 0);
-    else if (TTF_GetTextFont(v->icon_font) != font) TTF_SetTextFont(v->icon_font, font);
-    if (!v->icon_font) return;
-    v->icon_font_serif = to_serif;
-    SDL_Color c = hot ? th->block_text : th->block_label;
-    TTF_SetTextColor(v->icon_font, c.r, c.g, c.b, 0xFF);
-    int tw = 0, tht = 0;
-    TTF_GetTextSize(v->icon_font, &tw, &tht);
-    md_text_draw(v->icon_font, SDL_roundf(bt.x + (bt.w - (float)tw) * 0.5f),
-                         SDL_roundf(bt.y + (bt.h - (float)tht) * 0.5f));
-}
-
 bool view_set_serif(View *v, bool serif)
 {
     if (serif == v->serif) return false;
@@ -1389,7 +1344,6 @@ void view_draw(View *v, SDL_Renderer *r)
     }
     view_draw_selection(v, r);
     draw_scrollbar(v, r);
-    if (v->mouse_inside) draw_font_button(v, r);
 }
 
 /* F12: the whole document as one image, at the viewer's width and scale.
@@ -1432,10 +1386,8 @@ SDL_Surface *view_render_surface(View *v, SDL_Renderer *r, const char **error)
     const float old_scroll = v->scroll, old_height = v->height;
     const bool old_sel = v->has_sel;
     const int old_hover = v->hover_code, old_copied = v->copied_item;
-    const bool old_inside = v->mouse_inside;
     v->has_sel = false; /* no selection highlight in the picture */
     v->hover_code = v->copied_item = -1; /* nor copy buttons */
-    v->mouse_inside = false; /* nor the font button */
     v->exporting = true;      /* nor the scroll bar */
 
     SDL_SetRenderTarget(r, tex);
@@ -1464,7 +1416,6 @@ SDL_Surface *view_render_surface(View *v, SDL_Renderer *r, const char **error)
     v->has_sel = old_sel;
     v->hover_code = old_hover;
     v->copied_item = old_copied;
-    v->mouse_inside = old_inside;
     v->exporting = false;
     SDL_DestroyTexture(tex);
     if (*error) {
@@ -1492,7 +1443,6 @@ static int code_block_at(View *v, float x, float y)
 
 int view_copy_button_at(View *v, float x, float y)
 {
-    if (view_font_button_at(v, x, y)) return -1; /* the font button is on top */
     int i = code_block_at(v, x, y);
     if (i < 0) return -1;
     SDL_FRect bt = copy_button_rect(v, &v->items[i]);
@@ -1503,18 +1453,15 @@ int view_copy_button_at(View *v, float x, float y)
 bool view_hover(View *v, float x, float y)
 {
     const bool inside = x >= 0;
-    const bool font = inside && view_font_button_at(v, x, y);
-    const bool bar = inside && !font && view_scrollbar_at(v, x, y);
-    int i = font || bar ? -1 : code_block_at(v, x, y);
+    const bool bar = inside && view_scrollbar_at(v, x, y);
+    int i = bar ? -1 : code_block_at(v, x, y);
     bool button = i >= 0 && view_copy_button_at(v, x, y) == i;
     bool changed = i != v->hover_code || button != v->hover_button ||
-                   inside != v->mouse_inside || font != v->hover_font_button ||
-                   bar != v->hover_scrollbar;
+                   inside != v->mouse_inside || bar != v->hover_scrollbar;
     v->hover_scrollbar = bar;
     v->hover_code = i;
     v->hover_button = button;
     v->mouse_inside = inside;
-    v->hover_font_button = font;
     return changed;
 }
 

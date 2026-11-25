@@ -597,7 +597,7 @@ static void draw_chrome(SDL_Renderer *r)
     int w = 0, oh = 0;
     SDL_GetRenderOutputSize(r, &w, &oh);
     const bool active = (SDL_GetWindowFlags(app.window) & SDL_WINDOW_INPUT_FOCUS) != 0;
-    chrome_draw(r, app.fonts_ok ? app.engine : NULL, &app.view.theme, app.title, active,
+    chrome_draw(r, app.fonts_ok ? app.engine : NULL, &app.view.theme, app.title, app.view.serif, active,
                 (float)w, h, display_scale());
 }
 
@@ -1132,8 +1132,7 @@ static void viewer_hover(float x, float y)
     const char *url;
     size_t len;
     set_hand_cursor(inside && !app.view.hover_scrollbar &&
-                    (app.view.hover_button || app.view.hover_font_button ||
-                               view_link_at(&app.view, vx, vy, &url, &len)));
+                    (app.view.hover_button || view_link_at(&app.view, vx, vy, &url, &len)));
 }
 
 /* After scrolling, the content under a still mouse has changed. */
@@ -1480,9 +1479,14 @@ static bool handle_event(const SDL_Event *e)
         float x = e->button.x, y = e->button.y;
         to_pixels(&x, &y);
         bool down = e->type == SDL_EVENT_MOUSE_BUTTON_DOWN;
-        if (chrome_copy_button_at(x, y) && !app.view.scrollbar_drag && !app.selecting) {
-            /* The copy-path button in the title bar, like F2. */
-            if (down && e->button.button == SDL_BUTTON_LEFT) copy_path();
+        const int tool = app.view.scrollbar_drag || app.selecting ? CHROME_TOOL_NONE
+                                                                  : chrome_tool_at(x, y);
+        if (tool != CHROME_TOOL_NONE) {
+            /* md's buttons in the title bar: copy path (F2), font (F7). */
+            if (down && e->button.button == SDL_BUTTON_LEFT) {
+                if (tool == CHROME_TOOL_COPY) copy_path();
+                else toggle_serif();
+            }
             break;
         }
         float vx = x - app.viewer_rect.x, vy = y - app.viewer_rect.y;
@@ -1513,8 +1517,6 @@ static bool handle_event(const SDL_Event *e)
         if (left_in_viewer && view_scrollbar_press(&app.view, vx, vy)) {
             app.viewer_scrolled = true;
             app.dirty = true;
-        } else if (left_in_viewer && view_font_button_at(&app.view, vx, vy)) {
-            toggle_serif();
         } else if (copy_item >= 0) {
             copy_code_block(copy_item);
         } else if (down && e->button.button == SDL_BUTTON_LEFT && viewer_visible() &&
@@ -1550,9 +1552,10 @@ static bool handle_event(const SDL_Event *e)
     case SDL_EVENT_MOUSE_MOTION: {
         float mx = e->motion.x, my = e->motion.y;
         to_pixels(&mx, &my);
-        const bool on_copy = chrome_copy_button_at(mx, my) && !app.selecting;
-        if (chrome_set_copy_hover(on_copy)) app.dirty = true;
-        if (on_copy) {
+        const int tool = app.selecting || app.view.scrollbar_drag ? CHROME_TOOL_NONE
+                                                                  : chrome_tool_at(mx, my);
+        if (chrome_set_tool_hover(tool)) app.dirty = true;
+        if (tool != CHROME_TOOL_NONE) {
             set_hand_cursor(true);
             break;
         }
@@ -1613,7 +1616,7 @@ static bool handle_event(const SDL_Event *e)
         break;
     case SDL_EVENT_WINDOW_MOUSE_LEAVE:
         if (view_hover(&app.view, -1, 0)) app.dirty = true;
-        if (chrome_set_copy_hover(false)) app.dirty = true;
+        if (chrome_set_tool_hover(CHROME_TOOL_NONE)) app.dirty = true;
         break;
     case SDL_EVENT_SYSTEM_THEME_CHANGED: {
         if (!app.theme_forced) set_dark(SDL_GetSystemTheme() == SDL_SYSTEM_THEME_DARK);

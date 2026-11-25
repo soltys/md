@@ -12,10 +12,17 @@
 enum { BTN_NONE, BTN_MIN, BTN_MAX, BTN_CLOSE };
 
 static SDL_Window *win;
-/* The copy-path button after the title, client pixels (w 0: not shown).
- * It is client area, so md gets its clicks as ordinary mouse events. */
-static SDL_FRect copy_rect;
-static bool copy_hover;
+/* md's own buttons in the bar (CHROME_TOOL_*), client pixels (w 0: not
+ * shown): the copy-path button after the title and the "Aa" font button
+ * left of minimize. They are client area, so md gets their clicks as
+ * ordinary mouse events. */
+static SDL_FRect tool_rect[CHROME_TOOL_COUNT];
+static int tool_hover;
+
+static bool in_frect(const SDL_FRect *rc, float x, float y)
+{
+    return rc->w > 0 && x >= rc->x && x < rc->x + rc->w && y >= rc->y && y < rc->y + rc->h;
+}
 static int hover, pressed; /* BTN_* under the mouse / held down */
 
 static int button_px(float s) { return (int)(BUTTON_W * s + 0.5f); }
@@ -101,10 +108,7 @@ static LRESULT hit_test(HWND h, LPARAM lp, LRESULT def)
     case BTN_CLOSE: return HTCLOSE;
     default: break;
     }
-    if (copy_rect.w > 0 && pt.x >= copy_rect.x && pt.x < copy_rect.x + copy_rect.w &&
-        pt.y >= copy_rect.y && pt.y < copy_rect.y + copy_rect.h) {
-        return HTCLIENT;
-    }
+    if (chrome_tool_at((float)pt.x, (float)pt.y)) return HTCLIENT;
     if (pt.x < icon_px(s)) return HTSYSMENU;
     return HTCAPTION;
 }
@@ -244,7 +248,7 @@ typedef struct CachedText {
     char str[1024];
 } CachedText;
 
-enum { TXT_ICON, TXT_TITLE, TXT_COPY, TXT_MIN, TXT_MAX, TXT_CLOSE, TXT_COUNT };
+enum { TXT_ICON, TXT_TITLE, TXT_COPY, TXT_FONT, TXT_MIN, TXT_MAX, TXT_CLOSE, TXT_COUNT };
 static CachedText texts[TXT_COUNT];
 
 static TTF_Text *cached(int slot, TTF_TextEngine *engine, TTF_Font *font, const char *s)
@@ -346,7 +350,7 @@ static const char *fit_title(TTF_Font *font, const char *s, float room)
 }
 
 void chrome_draw(SDL_Renderer *r, TTF_TextEngine *engine, const Theme *th, const char *title,
-                 bool active, float width, float height, float scale)
+                 bool serif, bool active, float width, float height, float scale)
 {
     if (height <= 0) return;
     SDL_SetRenderDrawBlendMode(r, SDL_BLENDMODE_BLEND);
@@ -388,6 +392,18 @@ void chrome_draw(SDL_Renderer *r, TTF_TextEngine *engine, const Theme *th, const
     }
     if (!glyphs) return;
 
+    /* "Aa" left of minimize, in the face a click switches to, so the
+     * button previews it. */
+    SDL_FRect *font_box = &tool_rect[CHROME_TOOL_FONT];
+    *font_box = (SDL_FRect){width - 4 * bw, 0, bw, height - line_h};
+    const bool font_hot = tool_hover == CHROME_TOOL_FONT;
+    if (font_hot) {
+        SDL_SetRenderDrawColor(r, th->text.r, th->text.g, th->text.b, 0x17);
+        SDL_RenderFillRect(r, font_box);
+    }
+    TTF_Font *aa = fonts_get(serif ? FONT_REGULAR : FONT_SERIF, SDL_roundf(15.0f * scale));
+    if (aa) draw_centered(cached(TXT_FONT, engine, aa, "Aa"), fg, font_box);
+
     const float icon_w = (float)icon_px(scale);
     SDL_FRect icon_box = {0, 0, icon_w, height - line_h};
     /* 16 px per whole step of scale: exact images from the icon, crisp. */
@@ -409,8 +425,9 @@ void chrome_draw(SDL_Renderer *r, TTF_TextEngine *engine, const Theme *th, const
     const bool has_file = title && title[0];
     const float copy_w = SDL_roundf(28 * scale), copy_h = SDL_roundf(24 * scale);
     const float gap = SDL_roundf(4 * scale);
-    const float title_end = width - 3 * bw - 8 * scale - (has_file ? gap + copy_w : 0);
-    copy_rect = (SDL_FRect){0, 0, 0, 0};
+    const float title_end = width - 4 * bw - 8 * scale - (has_file ? gap + copy_w : 0);
+    SDL_FRect *copy_rect = &tool_rect[CHROME_TOOL_COPY];
+    *copy_rect = (SDL_FRect){0, 0, 0, 0};
     if (title_font && title_end > icon_w) {
         TTF_Text *t = cached(TXT_TITLE, engine, title_font,
                              fit_title(title_font, has_file ? title : "md", title_end - icon_w));
@@ -424,31 +441,34 @@ void chrome_draw(SDL_Renderer *r, TTF_TextEngine *engine, const Theme *th, const
             SDL_SetRenderClipRect(r, NULL);
             if (has_file) {
                 const float x = icon_w + SDL_min((float)tw, title_end - icon_w) + gap;
-                copy_rect = (SDL_FRect){x, SDL_floorf((height - line_h - copy_h) * 0.5f), copy_w,
-                                        copy_h};
-                if (copy_hover) {
+                *copy_rect = (SDL_FRect){x, SDL_floorf((height - line_h - copy_h) * 0.5f),
+                                         copy_w, copy_h};
+                const bool copy_hot = tool_hover == CHROME_TOOL_COPY;
+                if (copy_hot) {
                     SDL_SetRenderDrawColor(r, th->text.r, th->text.g, th->text.b, 0x17);
-                    SDL_RenderFillRect(r, &copy_rect);
+                    SDL_RenderFillRect(r, copy_rect);
                 }
                 TTF_Font *f = fonts_get(FONT_REGULAR, 15.0f * scale);
                 if (f) {
                     draw_centered(cached(TXT_COPY, engine, f, GLYPH_COPY),
-                                  copy_hover ? th->text : th->muted, &copy_rect);
+                                  copy_hot ? th->text : th->muted, copy_rect);
                 }
             }
         }
     }
 }
 
-bool chrome_copy_button_at(float x, float y)
+int chrome_tool_at(float x, float y)
 {
-    return copy_rect.w > 0 && x >= copy_rect.x && x < copy_rect.x + copy_rect.w &&
-           y >= copy_rect.y && y < copy_rect.y + copy_rect.h;
+    for (int t = CHROME_TOOL_NONE + 1; t < CHROME_TOOL_COUNT; ++t) {
+        if (in_frect(&tool_rect[t], x, y)) return t;
+    }
+    return CHROME_TOOL_NONE;
 }
 
-bool chrome_set_copy_hover(bool hover_on)
+bool chrome_set_tool_hover(int tool)
 {
-    if (hover_on == copy_hover) return false;
-    copy_hover = hover_on;
+    if (tool == tool_hover) return false;
+    tool_hover = tool;
     return true;
 }

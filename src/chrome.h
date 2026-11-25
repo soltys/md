@@ -19,6 +19,14 @@
 #include <SDL3_ttf/SDL_ttf.h>
 #include "theme.h"
 
+/* md's own buttons in the title bar. */
+enum {
+    CHROME_TOOL_NONE,
+    CHROME_TOOL_COPY, /* after the title: copy the file's full path (F2) */
+    CHROME_TOOL_FONT, /* "Aa" left of minimize: sans-serif / serif (F7) */
+    CHROME_TOOL_COUNT
+};
+
 /* Takes over the title bar of a (still hidden) window. changed() is called
  * on the main thread, from inside the window procedure, when the bar must
  * be redrawn (a button hovered or pressed); it should only post an event. */
@@ -34,11 +42,11 @@ void chrome_set_dark(bool dark);
 /* Draws the bar across the top of the window, height pixels tall. title is
  * the document name (or NULL); active is whether the window has focus. */
 void chrome_draw(SDL_Renderer *r, TTF_TextEngine *engine, const Theme *th, const char *title,
-                 bool active, float width, float height, float scale);
+                 bool serif, bool active, float width, float height, float scale);
 
-/* The copy-path button drawn after the title (client pixels), and its
- * hover look; chrome_set_copy_hover returns true when that changed. */
-bool chrome_copy_button_at(float x, float y);
-bool chrome_set_copy_hover(bool hover);
+/* md's own buttons in the bar: the one at client pixel (x, y), and which
+ * one looks hovered (chrome_set_tool_hover returns true when that changed). */
+int chrome_tool_at(float x, float y);
+bool chrome_set_tool_hover(int tool);
 
 #endif

@@ -27,7 +27,7 @@ follows as you type.
 | `F1` | Show / hide a list of all shortcuts |
 | `F2` | Copy the full path of the open file |
 | `F5` | Reload the file from disk (through Neovim when it runs; unsaved edits are kept) |
-| `F7` | Switch the text between Roboto and Roboto Serif (also `--serif`, or the **Aa** button in the preview's top-right corner) |
+| `F7` | Switch the text between Roboto and Roboto Serif (also `--serif`, or the **Aa** button in the title bar, left of minimize) |
 | `F8` | Switch between the light and dark theme (also `--light` / `--dark`) |
 | `F12` | Save the whole rendered document as a PNG image |
 | `Ctrl+Shift+O` | Switch the split between side by side and stacked |
@@ -56,7 +56,8 @@ Neovim to quit, so unsaved changes are never lost silently.
 On Windows md draws its own title bar in the theme's colours (it follows `F8`):
 md's icon, the full path of the open file (shortened from the left when the
 window is narrow, so the file name stays visible) with a copy button after it
-that copies the full path like `F2`, and minimize / maximize / close buttons in the
+that copies the full path like `F2`, an **Aa** button that switches the font
+like `F7`, and minimize / maximize / close buttons in the
 Windows 11 style (the close button turns red on hover). It is still a normal
 Windows window underneath, so everything native keeps working: drag the bar to
 move, double-click it to maximize, drag to a screen edge to snap, hover the

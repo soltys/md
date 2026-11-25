@@ -88,12 +88,7 @@ typedef struct View {
     /* Body text in Roboto Serif instead of Roboto (F7, --serif, the "Aa"
      * button). Change it with view_set_serif(). */
     bool serif;
-    /* The "Aa" font button in the top-right corner, shown while the mouse
-     * is over the preview. */
-    bool mouse_inside;
-    bool hover_font_button;
-    TTF_Text *icon_font;
-    bool icon_font_serif;     /* which face icon_font was made with */
+    bool mouse_inside;        /* the mouse is over the preview */
     /* Overlay scroll bar on the right edge: thin, wider while the mouse is
      * near it or its thumb is being dragged. */
     bool hover_scrollbar;
@@ -150,8 +145,6 @@ void view_set_copied(View *v, int item);
 /* Switches the body text between Roboto and Roboto Serif, keeping the
  * scroll position. Returns true when it changed. */
 bool view_set_serif(View *v, bool serif);
-/* True when viewport position (x, y) is on the "Aa" font button. */
-bool view_font_button_at(View *v, float x, float y);
 
 /* Link under a viewport position (pixels); returns false if none. */
 bool view_link_at(View *v, float x, float y, const char **url, size_t *len);
