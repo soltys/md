@@ -256,6 +256,8 @@ static void update_title(void)
             if (*p == '/' || *p == '\\') name = p + 1;
         }
     }
+    SDL_strlcpy(app.title, name ? name : "", sizeof app.title);
+    app.dirty = true;
     char *title = NULL;
     if (name) SDL_asprintf(&title, "%s - " APP_NAME, name);
     SDL_SetWindowTitle(app.window, title ? title : APP_NAME);
@@ -597,7 +599,7 @@ static void draw_chrome(SDL_Renderer *r)
     int w = 0, oh = 0;
     SDL_GetRenderOutputSize(r, &w, &oh);
     const bool active = (SDL_GetWindowFlags(app.window) & SDL_WINDOW_INPUT_FOCUS) != 0;
-    chrome_draw(r, app.fonts_ok ? app.engine : NULL, &app.view.theme, active,
+    chrome_draw(r, app.fonts_ok ? app.engine : NULL, &app.view.theme, app.title, active,
                 (float)w, h, display_scale());
 }
 
