@@ -57,7 +57,17 @@ static int cache_count;
 static struct { float px; TTF_Font *font; } emoji_cache[MAX_EMOJI_SIZES];
 static int emoji_count;
 
-static TTF_Font *open_asset(int asset, float px)
+/* Hinting for the proportional faces (Roboto, Roboto Serif) and the symbol
+ * fallbacks. Light hinting only snaps heights (baseline, x-height, cap
+ * height) and keeps the designed glyph widths and spacing, which is what
+ * browsers and VS Code do on Windows. Full ("normal") hinting also squeezes
+ * every glyph and its advance onto whole pixels: Roboto Serif and the Nerd
+ * Font have no hints of their own, so FreeType's auto-hinter does that and
+ * the letters come out boxy and unevenly spaced. MD_FONT_HINTING=normal |
+ * light | none overrides it. */
+static TTF_HintingFlags text_hinting = TTF_HINTING_LIGHT;
+
+static TTF_Font *open_asset(int asset, float px, TTF_HintingFlags hinting)
 {
     const void *data;
     size_t size;
@@ -69,7 +79,10 @@ static TTF_Font *open_asset(int asset, float px)
      * unpacked copy of a compressed font); FreeType reads tables lazily. */
     SDL_IOStream *io = SDL_IOFromConstMem(data, size);
     if (!io) return NULL;
-    return TTF_OpenFontIO(io, true, px);
+    TTF_Font *font = TTF_OpenFontIO(io, true, px);
+    /* Set before any glyph is loaded, so no cache is flushed. */
+    if (font) TTF_SetFontHinting(font, hinting);
+    return font;
 }
 
 static TTF_Font *create_entry(FontFace face, float px)
@@ -85,7 +98,11 @@ static TTF_Font *create_entry(FontFace face, float px)
     TTF_Font *sans = serif ? fonts_get(FONT_REGULAR, px) : NULL;
     if (cache_count == MAX_CACHED_FONTS) return cache[0].font;
     TIMING_MARK("(work before font open)");
-    TTF_Font *font = open_asset(face_asset[face], px);
+    /* Monospace faces keep full hinting: whole-pixel advances keep every
+     * column on the editor's cell grid and code evenly spaced. */
+    const bool mono = face == FONT_MONO || face == FONT_MONO_ITALIC || face == FONT_MONO_BOLD ||
+                      face == FONT_MONO_BOLD_ITALIC;
+    TTF_Font *font = open_asset(face_asset[face], px, mono ? TTF_HINTING_NORMAL : text_hinting);
     TIMING_MARK("open font %s %.2fpx", face_name[face], px);
     if (!font) return NULL;
 
@@ -104,18 +121,16 @@ static TTF_Font *create_entry(FontFace face, float px)
         }
     }
     if (owns) {
-        math = open_asset(ASSET_NOTO_MATH, px);
+        math = open_asset(ASSET_NOTO_MATH, px, text_hinting);
         TIMING_MARK("open fallback Noto Sans Math %.2fpx", px);
-        symbols = open_asset(ASSET_NOTO_SYMBOLS2, px);
+        symbols = open_asset(ASSET_NOTO_SYMBOLS2, px, text_hinting);
         TIMING_MARK("open fallback Noto Sans Symbols 2 %.2fpx", px);
-        nerd = open_asset(ASSET_ROBOTO_MONO, px);
+        nerd = open_asset(ASSET_ROBOTO_MONO, px, text_hinting);
         TIMING_MARK("open fallback Roboto Mono (Nerd icons) %.2fpx", px);
     }
     if (sans) TTF_AddFallbackFont(font, sans);
     if (math) TTF_AddFallbackFont(font, math);
     if (symbols) TTF_AddFallbackFont(font, symbols);
-    bool mono = face == FONT_MONO || face == FONT_MONO_ITALIC || face == FONT_MONO_BOLD ||
-                face == FONT_MONO_BOLD_ITALIC;
     if (nerd && !mono) TTF_AddFallbackFont(font, nerd);
     /* The emoji face joins the chain only once it has been opened for this
      * size (fonts_get_emoji), then for every face of that size. */
@@ -143,6 +158,12 @@ static const int serif_assets[] = {
 bool fonts_init(float warm_px, bool serif)
 {
     if (!TTF_Init()) return false;
+    const char *hint = SDL_getenv("MD_FONT_HINTING");
+    if (hint) {
+        if (SDL_strcasecmp(hint, "normal") == 0) text_hinting = TTF_HINTING_NORMAL;
+        else if (SDL_strcasecmp(hint, "none") == 0) text_hinting = TTF_HINTING_NONE;
+        else if (SDL_strcasecmp(hint, "light") == 0) text_hinting = TTF_HINTING_LIGHT;
+    }
     TIMING_MARK("TTF_Init (FreeType, HarfBuzz)");
     /* Warm the body font (and with it FreeType, HarfBuzz and the symbol
      * fallbacks) so the first frame only has to rasterise glyphs. */
@@ -211,7 +232,7 @@ TTF_Font *fonts_get_emoji(float px)
     }
     if (emoji_count == MAX_EMOJI_SIZES) return emoji_cache[0].font;
     TIMING_MARK("(work before font open)");
-    TTF_Font *emoji = open_asset(ASSET_NOTO_EMOJI, px);
+    TTF_Font *emoji = open_asset(ASSET_NOTO_EMOJI, px, text_hinting);
     /* An event: emoji are often first needed after the first render. */
     TIMING_EVENT("open Noto Color Emoji %.2fpx (first emoji at this size)", px);
     /* Cached even when it failed, so a missing font is not retried for
