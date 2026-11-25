@@ -12,6 +12,10 @@
 enum { BTN_NONE, BTN_MIN, BTN_MAX, BTN_CLOSE };
 
 static SDL_Window *win;
+/* The copy-path button after the title, client pixels (w 0: not shown).
+ * It is client area, so md gets its clicks as ordinary mouse events. */
+static SDL_FRect copy_rect;
+static bool copy_hover;
 static int hover, pressed; /* BTN_* under the mouse / held down */
 
 static int button_px(float s) { return (int)(BUTTON_W * s + 0.5f); }
@@ -96,6 +100,10 @@ static LRESULT hit_test(HWND h, LPARAM lp, LRESULT def)
     case BTN_MAX:   return HTMAXBUTTON;
     case BTN_CLOSE: return HTCLOSE;
     default: break;
+    }
+    if (copy_rect.w > 0 && pt.x >= copy_rect.x && pt.x < copy_rect.x + copy_rect.w &&
+        pt.y >= copy_rect.y && pt.y < copy_rect.y + copy_rect.h) {
+        return HTCLIENT;
     }
     if (pt.x < icon_px(s)) return HTSYSMENU;
     return HTCAPTION;
@@ -236,7 +244,7 @@ typedef struct CachedText {
     char str[1024];
 } CachedText;
 
-enum { TXT_ICON, TXT_TITLE, TXT_MIN, TXT_MAX, TXT_CLOSE, TXT_COUNT };
+enum { TXT_ICON, TXT_TITLE, TXT_COPY, TXT_MIN, TXT_MAX, TXT_CLOSE, TXT_COUNT };
 static CachedText texts[TXT_COUNT];
 
 static TTF_Text *cached(int slot, TTF_TextEngine *engine, TTF_Font *font, const char *s)
@@ -265,6 +273,7 @@ static void draw_centered(TTF_Text *t, SDL_Color c, const SDL_FRect *box)
 #define GLYPH_MAXIMIZE "\xEE\xAA\xB9" /* U+EAB9 chrome-maximize */
 #define GLYPH_RESTORE  "\xEE\xAA\xBB" /* U+EABB chrome-restore */
 #define GLYPH_CLOSE    "\xEE\xAA\xB8" /* U+EAB8 chrome-close */
+#define GLYPH_COPY     "\xEE\xAF\x8C" /* U+EBCC copy */
 #define GLYPH_MARKDOWN "\xEE\x9C\xBE" /* U+E73E dev-markdown */
 
 /* md's own icon (the exe's icon resource), as a texture size pixels
@@ -397,11 +406,14 @@ void chrome_draw(SDL_Renderer *r, TTF_TextEngine *engine, const Theme *th, const
     }
 
     TTF_Font *title_font = fonts_get(FONT_REGULAR, 13.0f * scale);
-    const float title_end = width - 3 * bw - 8 * scale;
+    const bool has_file = title && title[0];
+    const float copy_w = SDL_roundf(28 * scale), copy_h = SDL_roundf(24 * scale);
+    const float gap = SDL_roundf(4 * scale);
+    const float title_end = width - 3 * bw - 8 * scale - (has_file ? gap + copy_w : 0);
+    copy_rect = (SDL_FRect){0, 0, 0, 0};
     if (title_font && title_end > icon_w) {
-        const char *full = title && title[0] ? title : "md";
         TTF_Text *t = cached(TXT_TITLE, engine, title_font,
-                             fit_title(title_font, full, title_end - icon_w));
+                             fit_title(title_font, has_file ? title : "md", title_end - icon_w));
         if (t) {
             int tw = 0, tht = 0;
             TTF_GetTextSize(t, &tw, &tht);
@@ -410,6 +422,33 @@ void chrome_draw(SDL_Renderer *r, TTF_TextEngine *engine, const Theme *th, const
             TTF_SetTextColor(t, fg.r, fg.g, fg.b, 0xFF);
             md_text_draw(t, icon_w, SDL_floorf((height - line_h - (float)tht) * 0.5f));
             SDL_SetRenderClipRect(r, NULL);
+            if (has_file) {
+                const float x = icon_w + SDL_min((float)tw, title_end - icon_w) + gap;
+                copy_rect = (SDL_FRect){x, SDL_floorf((height - line_h - copy_h) * 0.5f), copy_w,
+                                        copy_h};
+                if (copy_hover) {
+                    SDL_SetRenderDrawColor(r, th->text.r, th->text.g, th->text.b, 0x17);
+                    SDL_RenderFillRect(r, &copy_rect);
+                }
+                TTF_Font *f = fonts_get(FONT_REGULAR, 15.0f * scale);
+                if (f) {
+                    draw_centered(cached(TXT_COPY, engine, f, GLYPH_COPY),
+                                  copy_hover ? th->text : th->muted, &copy_rect);
+                }
+            }
         }
     }
+}
+
+bool chrome_copy_button_at(float x, float y)
+{
+    return copy_rect.w > 0 && x >= copy_rect.x && x < copy_rect.x + copy_rect.w &&
+           y >= copy_rect.y && y < copy_rect.y + copy_rect.h;
+}
+
+bool chrome_set_copy_hover(bool hover_on)
+{
+    if (hover_on == copy_hover) return false;
+    copy_hover = hover_on;
+    return true;
 }

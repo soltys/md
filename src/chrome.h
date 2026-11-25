@@ -36,4 +36,9 @@ void chrome_set_dark(bool dark);
 void chrome_draw(SDL_Renderer *r, TTF_TextEngine *engine, const Theme *th, const char *title,
                  bool active, float width, float height, float scale);
 
+/* The copy-path button drawn after the title (client pixels), and its
+ * hover look; chrome_set_copy_hover returns true when that changed. */
+bool chrome_copy_button_at(float x, float y);
+bool chrome_set_copy_hover(bool hover);
+
 #endif

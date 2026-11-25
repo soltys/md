@@ -426,7 +426,7 @@ static void draw_toast(SDL_Renderer *r)
 static const char *const HELP[][2] = {
     {NULL, "General"},
     {"F1", "Show / hide this help"},
-    {"F2", "Copy the full path of the file"},
+    {"F2", "Copy the full path (or the title bar button)"},
     {"F5", "Reload the file from disk"},
     {"F7", "Switch between sans-serif and serif text"},
     {"F8", "Switch between light and dark theme"},
@@ -1480,6 +1480,11 @@ static bool handle_event(const SDL_Event *e)
         float x = e->button.x, y = e->button.y;
         to_pixels(&x, &y);
         bool down = e->type == SDL_EVENT_MOUSE_BUTTON_DOWN;
+        if (chrome_copy_button_at(x, y) && !app.view.scrollbar_drag && !app.selecting) {
+            /* The copy-path button in the title bar, like F2. */
+            if (down && e->button.button == SDL_BUTTON_LEFT) copy_path();
+            break;
+        }
         float vx = x - app.viewer_rect.x, vy = y - app.viewer_rect.y;
         if (e->button.button == SDL_BUTTON_LEFT && !down && app.view.scrollbar_drag) {
             view_scrollbar_release(&app.view);
@@ -1542,7 +1547,16 @@ static bool handle_event(const SDL_Event *e)
         if (!down) app.mouse_down_editor = false;
         break;
     }
-    case SDL_EVENT_MOUSE_MOTION:
+    case SDL_EVENT_MOUSE_MOTION: {
+        float mx = e->motion.x, my = e->motion.y;
+        to_pixels(&mx, &my);
+        const bool on_copy = chrome_copy_button_at(mx, my) && !app.selecting;
+        if (chrome_set_copy_hover(on_copy)) app.dirty = true;
+        if (on_copy) {
+            set_hand_cursor(true);
+            break;
+        }
+    }
         if (app.view.scrollbar_drag) {
             float x = e->motion.x, y = e->motion.y;
             to_pixels(&x, &y);
@@ -1599,6 +1613,7 @@ static bool handle_event(const SDL_Event *e)
         break;
     case SDL_EVENT_WINDOW_MOUSE_LEAVE:
         if (view_hover(&app.view, -1, 0)) app.dirty = true;
+        if (chrome_set_copy_hover(false)) app.dirty = true;
         break;
     case SDL_EVENT_SYSTEM_THEME_CHANGED: {
         if (!app.theme_forced) set_dark(SDL_GetSystemTheme() == SDL_SYSTEM_THEME_DARK);
