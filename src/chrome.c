@@ -18,6 +18,8 @@ static SDL_Window *win;
  * ordinary mouse events. */
 static SDL_FRect tool_rect[CHROME_TOOL_COUNT];
 static int tool_hover;
+/* Caption button geometry from the last frame, for tooltips. */
+static float caption_w, caption_bw, caption_h;
 
 static bool in_frect(const SDL_FRect *rc, float x, float y)
 {
@@ -366,6 +368,9 @@ void chrome_draw(SDL_Renderer *r, TTF_TextEngine *engine, const Theme *th, const
     const SDL_Color fg = active ? th->text : th->muted;
     const SDL_Color white = {0xFF, 0xFF, 0xFF, 0xFF};
     const float bw = (float)button_px(scale);
+    caption_w = width;
+    caption_bw = bw;
+    caption_h = height - line_h;
     const bool maximized = win && (SDL_GetWindowFlags(win) & SDL_WINDOW_MAXIMIZED);
     /* Through Roboto: its Nerd Font fallback is unhinted, and hinting
      * flattens these thin-line icons. */
@@ -456,6 +461,22 @@ void chrome_draw(SDL_Renderer *r, TTF_TextEngine *engine, const Theme *th, const
             }
         }
     }
+}
+
+const char *chrome_tooltip(bool serif, SDL_FRect *anchor)
+{
+    if (tool_hover != CHROME_TOOL_NONE && tool_rect[tool_hover].w > 0) {
+        *anchor = tool_rect[tool_hover];
+        if (tool_hover == CHROME_TOOL_COPY) return "Copy the full path (F2)";
+        return serif ? "Sans-serif text (F7)" : "Serif text (F7)";
+    }
+    /* Maximize has none: Windows 11 shows its Snap Layouts there. */
+    if ((hover == BTN_MIN || hover == BTN_CLOSE) && !pressed && caption_w > 0) {
+        *anchor = (SDL_FRect){caption_w - (float)(BTN_CLOSE - hover + 1) * caption_bw, 0,
+                              caption_bw, caption_h};
+        return hover == BTN_MIN ? "Minimize" : "Close";
+    }
+    return NULL;
 }
 
 int chrome_tool_at(float x, float y)

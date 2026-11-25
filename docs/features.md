@@ -63,7 +63,8 @@ Windows window underneath, so everything native keeps working: drag the bar to
 move, double-click it to maximize, drag to a screen edge to snap, hover the
 maximize button for **Snap Layouts**, right-click the bar (or click the icon) for
 the system menu, resize from any edge, rounded corners and the shadow. The
-title fades when the window is not focused.
+title fades when the window is not focused. Resting the mouse on a button shows a tooltip
+(minimize, close, the copy and **Aa** buttons, and code blocks' copy buttons).
 
 The preview has a thin scroll bar on its right edge, in the theme's colours. It
 widens when the mouse comes near it: drag the thumb to scroll, or click above or

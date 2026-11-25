@@ -1092,6 +1092,14 @@ static SDL_FRect copy_button_rect(const View *v, const ViewItem *it)
     return (SDL_FRect){SDL_roundf(right - margin - size), SDL_roundf(it->box_y + margin), size, size};
 }
 
+bool view_hovered_button_rect(const View *v, SDL_FRect *out)
+{
+    if (!v->hover_button || v->hover_code < 0 || v->hover_code >= v->laid) return false;
+    *out = copy_button_rect(v, &v->items[v->hover_code]);
+    out->y -= v->scroll;
+    return true;
+}
+
 static void draw_copy_button(View *v, SDL_Renderer *r, const ViewItem *it, int idx, float dy)
 {
     const Theme *th = &v->theme;

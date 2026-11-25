@@ -157,6 +157,8 @@ bool view_scrollbar_at(View *v, float x, float y);
 bool view_scrollbar_press(View *v, float x, float y);
 void view_scrollbar_drag(View *v, float y);
 void view_scrollbar_release(View *v);
+/* The code block copy button under the mouse, viewport pixels. */
+bool view_hovered_button_rect(const View *v, SDL_FRect *out);
 /* Lays out the whole document now (which also requests every image). */
 void view_layout_all(View *v);
 /* Draws the whole document into a new surface (F12, save as PNG). On

@@ -601,6 +601,75 @@ static void draw_chrome(SDL_Renderer *r)
                 (float)w, h, display_scale());
 }
 
+/* Tooltips: shown for a button the mouse has rested on for a moment,
+ * hidden again by a click until the mouse moves to another button. */
+#define TOOLTIP_DELAY_MS 600
+static struct {
+    const char *text;      /* current candidate */
+    SDL_FRect anchor;
+    Uint64 since;
+    bool clicked;
+} tip;
+
+static Uint32 SDLCALL tooltip_due(void *userdata, SDL_TimerID id, Uint32 interval)
+{
+    (void)userdata; (void)id; (void)interval;
+    chrome_changed(); /* posts a redraw */
+    return 0;
+}
+
+static void tooltip_hide_for_click(void) { tip.clicked = true; }
+
+static void draw_tooltip(SDL_Renderer *r)
+{
+    if (!app.fonts_ok || app.show_help) return;
+    SDL_FRect anchor;
+    const char *text = chrome_tooltip(app.view.serif, &anchor);
+    if (!text && viewer_visible() && SDL_GetMouseFocus() == app.window &&
+        view_hovered_button_rect(&app.view, &anchor)) {
+        anchor.x += app.viewer_rect.x;
+        anchor.y += app.viewer_rect.y;
+        text = "Copy the code";
+    }
+    const bool same = text && tip.text && SDL_strcmp(text, tip.text) == 0 &&
+                      anchor.x == tip.anchor.x && anchor.y == tip.anchor.y;
+    if (!same) {
+        tip.text = text;
+        tip.anchor = anchor;
+        tip.clicked = false;
+        tip.since = SDL_GetTicks();
+        if (text) SDL_AddTimer(TOOLTIP_DELAY_MS + 10, tooltip_due, NULL);
+        return;
+    }
+    if (!text || tip.clicked || SDL_GetTicks() - tip.since < TOOLTIP_DELAY_MS) return;
+
+    const float s = display_scale();
+    TTF_Font *font = fonts_get(FONT_REGULAR, 12.0f * s);
+    if (!font) return;
+    TTF_Text *t = TTF_CreateText(app.engine, font, text, 0);
+    if (!t) return;
+    int tw = 0, th = 0;
+    TTF_GetTextSize(t, &tw, &th);
+    int w = 0, h = 0;
+    SDL_GetRenderOutputSize(r, &w, &h);
+    const float pad_x = SDL_roundf(8 * s), pad_y = SDL_roundf(4 * s), gap = SDL_roundf(6 * s);
+    SDL_FRect box = {0, 0, (float)tw + 2 * pad_x, (float)th + 2 * pad_y};
+    box.x = SDL_roundf(anchor.x + (anchor.w - box.w) * 0.5f);
+    box.x = SDL_clamp(box.x, 4 * s, (float)w - box.w - 4 * s);
+    box.y = anchor.y + anchor.h + gap;
+    if (box.y + box.h > (float)h) box.y = anchor.y - gap - box.h;
+    const Theme *thm = &app.view.theme;
+    SDL_SetRenderDrawBlendMode(r, SDL_BLENDMODE_BLEND);
+    SDL_SetRenderDrawColor(r, thm->rule.r, thm->rule.g, thm->rule.b, 0xFF);
+    SDL_FRect border = {box.x - 1, box.y - 1, box.w + 2, box.h + 2};
+    SDL_RenderFillRect(r, &border);
+    SDL_SetRenderDrawColor(r, thm->code_bg.r, thm->code_bg.g, thm->code_bg.b, 0xFF);
+    SDL_RenderFillRect(r, &box);
+    TTF_SetTextColor(t, thm->text.r, thm->text.g, thm->text.b, 0xFF);
+    md_text_draw(t, box.x + pad_x, box.y + pad_y);
+    TTF_DestroyText(t);
+}
+
 static void render(void)
 {
 #if MD_TIMING
@@ -653,6 +722,7 @@ static void render(void)
     draw_search_bar(r);
     draw_help(r);
     draw_toast(r);
+    draw_tooltip(r);
     TIMING_MARK("frame %d: draw", timing_frame);
     SDL_RenderPresent(r);
     TIMING_MARK("frame %d: present (waits for vsync)", timing_frame);
@@ -1469,6 +1539,7 @@ static bool handle_event(const SDL_Event *e)
     }
     case SDL_EVENT_MOUSE_BUTTON_DOWN:
     case SDL_EVENT_MOUSE_BUTTON_UP: {
+        if (e->type == SDL_EVENT_MOUSE_BUTTON_DOWN) tooltip_hide_for_click();
         if (app.show_help) {
             if (e->type == SDL_EVENT_MOUSE_BUTTON_DOWN) {
                 app.show_help = false;

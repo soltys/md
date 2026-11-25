@@ -49,4 +49,8 @@ void chrome_draw(SDL_Renderer *r, TTF_TextEngine *engine, const Theme *th, const
 int chrome_tool_at(float x, float y);
 bool chrome_set_tool_hover(int tool);
 
+/* Text of the tooltip for what the mouse is on in the bar, and the
+ * button's rect (client pixels) to place it by; NULL when none. */
+const char *chrome_tooltip(bool serif, SDL_FRect *anchor);
+
 #endif
