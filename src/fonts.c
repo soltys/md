@@ -58,14 +58,15 @@ static struct { float px; TTF_Font *font; } emoji_cache[MAX_EMOJI_SIZES];
 static int emoji_count;
 
 /* Hinting for the proportional faces (Roboto, Roboto Serif) and the symbol
- * fallbacks. Light hinting only snaps heights (baseline, x-height, cap
- * height) and keeps the designed glyph widths and spacing, which is what
- * browsers and VS Code do on Windows. Full ("normal") hinting also squeezes
- * every glyph and its advance onto whole pixels: Roboto Serif and the Nerd
- * Font have no hints of their own, so FreeType's auto-hinter does that and
- * the letters come out boxy and unevenly spaced. MD_FONT_HINTING=normal |
- * light | none overrides it. */
-static TTF_HintingFlags text_hinting = TTF_HINTING_LIGHT;
+ * fallbacks. None: glyphs are drawn from the outlines as designed, with the
+ * softest anti-aliasing, as macOS and Chrome's grayscale text do (
+ * asked for more anti-aliasing). Light snaps heights (baseline, x-height)
+ * to pixels: a little sharper, a little harder. Full ("normal") hinting also
+ * squeezes every glyph and its advance onto whole pixels; Roboto Serif and
+ * the Nerd Font have no hints of their own, so FreeType's auto-hinter does
+ * that and the letters come out boxy and unevenly spaced.
+ * MD_FONT_HINTING=none | light | normal overrides it. */
+static TTF_HintingFlags text_hinting = TTF_HINTING_NONE;
 
 static TTF_Font *open_asset(int asset, float px, TTF_HintingFlags hinting)
 {

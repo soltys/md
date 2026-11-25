@@ -160,10 +160,9 @@ unsaved changes are never dropped silently.
   JavaScript, JSON, Bash, Rust, Lua, YAML and PowerShell, in Catppuccin
   colours (Latte light, Mocha dark)
 * Light/dark theme following Windows
-* Text uses light hinting (heights snapped to pixels, the fonts' own widths
-  and spacing kept, as in a browser); code and the editor use full hinting so
-  columns line up. `MD_FONT_HINTING=normal|light|none` picks another mode for
-  the text
+* Text is drawn without hinting (the fonts' own shapes and spacing, smooth
+  anti-aliasing); code and the editor use full hinting so columns line up.
+  `MD_FONT_HINTING=light|normal` makes text sharper
 
 ## ![](art/png/pencil@3x.png) Neovim config
 
