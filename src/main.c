@@ -32,7 +32,7 @@ static App app;
 
 /* ----------------------------------------------------------- workers -- */
 
-static bool start_serif; /* --serif: Roboto Serif from the first frame */
+static bool start_serif; /* Roboto Serif from the first frame (not --sans) */
 
 static int SDLCALL font_thread_main(void *unused)
 {

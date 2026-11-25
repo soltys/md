@@ -50,9 +50,9 @@ static const char HELP[] =
 "                        while md runs). '--theme dark' works too. The last\n"
 "                        theme option wins.\n"
 "    --serif             Show the text in Roboto Serif (Roboto's shapes with\n"
-"                        serifs) instead of Roboto. F7 or the Aa button switches\n"
+"                        serifs; the default). F7 or the Aa button switches\n"
 "                        while md runs.\n"
-"    --sans              Show the text in Roboto (the default).\n"
+"    --sans              Show the text in Roboto instead.\n"
 "    --font=FONT         sans or serif, the same as --sans / --serif. The last\n"
 "                        font option wins.\n"
 "    --renderer=NAME     Draw with this SDL renderer: direct3d11 (the default\n"
@@ -296,6 +296,7 @@ static bool is(const char *arg, const char *a, const char *b)
 int cli_parse(int argc, char **argv, CliOptions *out)
 {
     SDL_zerop(out);
+    out->serif = true; /* Roboto Serif body text unless --sans */
     bool only_files = false;
     for (int i = 1; i < argc; ++i) {
         const char *a = argv[i];
