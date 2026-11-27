@@ -349,6 +349,19 @@ void nvim_reload(Nvim *nv)
         NULL);
 }
 
+void nvim_checktime(Nvim *nv)
+{
+    if (!nv->attached) return;
+    /* The file changed on disk: Neovim re-reads it (autoread) unless the
+     * buffer has unsaved edits, which are never thrown away. */
+    exec_lua_notify(nv,
+        "if vim.api.nvim_buf_get_name(0) ~= '' and not vim.bo.modified then\n"
+        "  pcall(vim.cmd, 'silent! checktime')\n"
+        "  if vim.g.md_channel then vim.rpcnotify(vim.g.md_channel, 'md_changed') end\n"
+        "end\n",
+        NULL);
+}
+
 void nvim_scroll_to_line(Nvim *nv, int line)
 {
     if (!nv->attached) return;

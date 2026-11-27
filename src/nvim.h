@@ -103,6 +103,9 @@ void nvim_input_mouse(Nvim *nv, const char *button, const char *action,
 void nvim_edit_file(Nvim *nv, const char *path);
 /* F5: re-reads the buffer's file unless it has unsaved changes. */
 void nvim_reload(Nvim *nv);
+/* The open file changed on disk: re-read it if the buffer has no unsaved
+ * edits (auto-reload). */
+void nvim_checktime(Nvim *nv);
 /* Scrolls the editor so `line` (1-based) is at the top (viewer -> editor
  * sync); 0 shows the end of the file. */
 void nvim_scroll_to_line(Nvim *nv, int line);

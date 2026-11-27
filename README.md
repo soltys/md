@@ -108,7 +108,8 @@ Select text in the preview with the mouse (or Ctrl+A) and press Ctrl+C to copy
 it as rich text (Ctrl+Shift+C for plain text). Code blocks get a copy button in
 their top-right corner when the mouse is over them, and the Aa button in the
 title bar switches the text between Roboto Serif (the default) and Roboto
-(same as F7). Without `nvim` on `PATH`, md stays a viewer and says why when you ask for
+(same as F7). When the file changes on disk (another editor, git, a script),
+the preview reloads by itself and keeps its place. Without `nvim` on `PATH`, md stays a viewer and says why when you ask for
 the editor.
 
 See [docs/features.md](docs/features.md) for a tour of everything md renders;
@@ -127,16 +128,19 @@ open it in md to try it out.
 | Ctrl+Shift+X | Swap sides: editor left/right (top/bottom when stacked) |
 | Ctrl+Shift+E | Editor only on/off |
 | Ctrl+Shift+Tab | Move keyboard focus between editor and preview |
+| Ctrl+Shift+T | Outline on/off: the headings in a panel left of the preview; click one to jump there |
 | Ctrl+Shift+N | Open a file (also: drop a file on the window) |
 | Ctrl+O / Ctrl+Q | Open / quit, when the preview has focus |
+| Alt+Left / Alt+Right, mouse side buttons | Back / forward after following a link or opening a file |
 | Ctrl+A | Select all, when the preview has focus |
 | Ctrl+C / Ctrl+Shift+C | Copy the selection as rich text (pastes with headings, lists, links, code colours into Word, Outlook, browsers) / as plain text |
-| Click a link | Open it (drag over a link to select its text instead) |
+| Click a link | Open it; `#heading` links jump within the file, `other.md#heading` opens there (drag over a link to select its text instead) |
 | Click the copy button of a code block | Copy the block's code as plain text (the button shows when the mouse is over the block) |
 | PgUp / PgDn / Space / Home / End, wheel | Scroll the preview (the editor follows) |
+| Ctrl+wheel, Ctrl+= / Ctrl+- / Ctrl+0 | Zoom the preview in / out / back to 100% |
 | Shift+wheel, horizontal wheel / touchpad | Scroll a code block with long lines sideways (mouse over it) |
-| j / k, Ctrl+d / Ctrl+u, Ctrl+f / Ctrl+b, gg / G | Vim-style scrolling in the preview; counts work (5j, 42G = source line 42) |
-| / or ?, then n / N | Search the preview forward / backward, then jump between matches (case-insensitive unless the text has a capital) |
+| j / k, Ctrl+d / Ctrl+u, Ctrl+b, gg / G | Vim-style scrolling in the preview; counts work (5j, 42G = source line 42) |
+| Ctrl+F, / or ?, then n / N or F3 / Shift+F3 | Search the preview forward / backward, then jump between matches (case-insensitive unless the text has a capital) |
 
 App shortcuts use Ctrl+Shift so they never clash with AltGr letters on Polish
 and other keyboards (AltGr is Ctrl+Alt on Windows) or with Neovim's own keys.

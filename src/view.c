@@ -742,8 +742,10 @@ static void layout_until(View *v, int idx, float y_limit)
     }
 }
 
-/* Re-lays out from scratch, keeping the first visible block in place. */
-static void relayout_anchored(View *v)
+/* Re-lays out from scratch, keeping the first visible block in place.
+ * ratio is new scale / old scale (zoom, a move to another monitor): the
+ * current positions are still in the old scale. */
+static void relayout_anchored(View *v, float ratio)
 {
     int anchor = -1;
     float offset = 0;
@@ -752,7 +754,7 @@ static void relayout_anchored(View *v)
         float bottom = is_boxed(it->block) ? it->box_y + it->box_h : it->y + it->h;
         if (bottom > v->scroll) {
             anchor = i;
-            offset = v->scroll - item_top(it);
+            offset = (v->scroll - item_top(it)) * ratio;
             break;
         }
     }
@@ -840,13 +842,11 @@ void view_set_document(View *v, Document *doc, bool keep_scroll)
 void view_layout(View *v, float width, float height, float scale)
 {
     bool changed = width != v->width || scale != v->scale;
+    float ratio = v->scale > 0 ? scale / v->scale : 1.0f;
     v->width = width;
     v->height = height;
-    if (scale != v->scale) {
-        v->scroll = v->scroll * scale / v->scale;
-        v->scale = scale;
-    }
-    if (changed && v->doc && !v->doc->error) relayout_anchored(v);
+    v->scale = scale;
+    if (changed && v->doc && !v->doc->error) relayout_anchored(v, ratio);
     else if (v->doc) {
         layout_until(v, -1, v->scroll + 2 * v->height);
         view_scroll_by(v, 0);
@@ -855,7 +855,7 @@ void view_layout(View *v, float width, float height, float scale)
 
 void view_relayout(View *v)
 {
-    if (v->doc && !v->doc->error) relayout_anchored(v);
+    if (v->doc && !v->doc->error) relayout_anchored(v, 1.0f);
 }
 
 bool view_layout_pending(const View *v)
@@ -956,6 +956,15 @@ void view_scroll_to_line(View *v, int line)
     int into = line - (int)it->block->src_line;
     float frac = into <= 0 ? 0 : into >= lines ? 1 : (float)into / (float)lines;
     view_scroll_to(v, item_top(it) + frac * item_height(it) - MARGIN * v->scale);
+}
+
+/* Scrolls so item `idx` (a heading, for #anchors and the outline) starts at
+ * the top, with the usual margin above it. */
+void view_scroll_to_item(View *v, int idx)
+{
+    if (!v->doc || idx < 0 || idx >= v->item_count) return;
+    layout_until(v, idx, 0);
+    view_scroll_to(v, item_top(&v->items[idx]) - MARGIN * v->scale);
 }
 
 int view_top_line(const View *v)

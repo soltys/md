@@ -27,6 +27,7 @@
 #include "theme.h"
 #include "timing.h"
 #include "view.h"
+#include "watch.h"
 
 static App app;
 
@@ -220,11 +221,22 @@ static void relayout(void)
         app.editor_rect = none;
         app.viewer_rect = full;
     }
+    /* The outline panel takes the left part of the preview's area. */
+    app.outline_rect = none;
+    if (viewer_visible() && app.outline.visible) {
+        float gap = SDL_max(1.0f, SDL_floorf(scale));
+        float ow = outline_width(&app.outline, app.viewer_rect.w, scale);
+        if (ow > 0 && app.viewer_rect.w - ow - gap > 0) {
+            app.outline_rect = (SDL_FRect){app.viewer_rect.x, app.viewer_rect.y, ow, app.viewer_rect.h};
+            app.viewer_rect.x += ow + gap;
+            app.viewer_rect.w -= ow + gap;
+        }
+    }
     if (!editor_visible()) app.focus = PANE_VIEWER;
     else if (!viewer_visible()) app.focus = PANE_EDITOR;
 
     if (app.fonts_ok) {
-        view_layout(&app.view, app.viewer_rect.w, app.viewer_rect.h, scale);
+        view_layout(&app.view, app.viewer_rect.w, app.viewer_rect.h, scale * app.zoom);
         /* A new size re-wraps both panes differently: line the preview up
          * with the editor again rather than keeping its old pixel offset. */
         if (editor_visible() && viewer_visible() && app.nvim.attached && app.nvim.top_line > 0) {
@@ -262,6 +274,24 @@ static void update_title(void)
     SDL_free(path);
 }
 
+static void jump_to_block(int block);
+
+/* After following a link to another file (or going back to one): its
+ * #anchor, or where it was scrolled to before. */
+static void apply_pending_position(void)
+{
+    if (app.pending_anchor) {
+        int block = outline_find(&app.outline, app.pending_anchor);
+        if (block >= 0) jump_to_block(block);
+    } else if (app.pending_scroll >= 0) {
+        view_scroll_to(&app.view, app.pending_scroll * app.view.scale);
+        app.viewer_scrolled = true;
+    }
+    SDL_free(app.pending_anchor);
+    app.pending_anchor = NULL;
+    app.pending_scroll = -1;
+}
+
 static void take_loaded_document(void)
 {
     if (!app.fonts_ok) return;
@@ -277,7 +307,12 @@ static void take_loaded_document(void)
     view_set_document(&app.view, doc, same_file || follow);
     if (follow) follow_editor();
     TIMING_MARK("lay out first screen (%d of %d blocks)", app.view.laid, doc->block_count);
+    outline_sync(&app.outline, doc);
+    if (!same_file) apply_pending_position();
     update_title();
+    /* Auto-reload: watch the file on screen (also a missing one, which
+     * shows up once it is created). */
+    watch_file(doc->path, app.wake_event);
     TIMING_MARK("set window title");
     app.dirty = true;
 
@@ -436,11 +471,13 @@ static const char *const HELP[][2] = {
     {"Ctrl+Shift+E", "Editor only on / off"},
     {"Ctrl+Shift+O", "Side by side / stacked"},
     {"Ctrl+Shift+X", "Swap which side the editor is on"},
+    {"Ctrl+Shift+T", "Outline of the headings on / off"},
     {"Ctrl+Shift+Tab", "Move focus: editor / preview"},
     {NULL, "Files"},
     {"Ctrl+Shift+N", "Open a file (or drop one on the window)"},
     {"Ctrl+O", "Open a file (preview focused)"},
     {"Ctrl+Q", "Quit (preview focused)"},
+    {"Alt+Left / Right", "Back / forward (or the mouse side buttons)"},
     {"md.exe -e file.md", "Start with the editor open"},
     {NULL, NULL},
     {NULL, "Preview"},
@@ -450,15 +487,16 @@ static const char *const HELP[][2] = {
     {"Space, Home / End", "A page down, to the start / end"},
     {"j / k", "A line down / up (5j: five lines)"},
     {"Ctrl+d / Ctrl+u", "Half a page down / up"},
-    {"Ctrl+f / Ctrl+b", "A page down / up"},
+    {"Ctrl+b", "A page up"},
     {"gg / G", "Start / end (42G: source line 42)"},
-    {"/ or ?", "Search forward / backward"},
-    {"n / N", "Next / previous match"},
+    {"Ctrl+F, / or ?", "Search (? searches backward)"},
+    {"n / N, F3 / Shift+F3", "Next / previous match"},
+    {"Ctrl+wheel, Ctrl+= / -", "Zoom in / out (Ctrl+0: 100%)"},
     {"Drag, Shift+click", "Select text"},
     {"Ctrl+A", "Select all"},
     {"Ctrl+C", "Copy as rich text"},
     {"Ctrl+Shift+C", "Copy as plain text"},
-    {"Click a link", "Open it (.md files open in md)"},
+    {"Click a link", "Open it (.md files and #headings in md)"},
     {"Code block button", "Copy the code"},
 };
 
@@ -717,6 +755,10 @@ static void render(void)
             }
         }
         SDL_SetRenderViewport(r, NULL);
+        if (app.fonts_ok && app.outline_rect.w > 0) {
+            app.outline.current = app.view.doc ? outline_entry_at_line(&app.outline, view_top_line(&app.view)) : -1;
+            outline_draw(&app.outline, r, app.engine, &app.outline_rect, th, display_scale());
+        }
     }
     draw_chrome(r);
     draw_search_bar(r);
@@ -974,10 +1016,14 @@ static void viewer_key(const SDL_KeyboardEvent *k)
         if (!ctrl || shift || alt) return;
         view_scroll_by(v, (k->key == SDLK_D ? 1.0f : -1.0f) * (float)n * SDL_floorf(v->height * 0.5f));
         break;
-    case SDLK_F: case SDLK_B:
+    case SDLK_B: /* Ctrl+b: a page up (Ctrl+F is find, not vim's page down) */
         if (!ctrl || shift || alt) return;
-        view_scroll_by(v, (k->key == SDLK_F ? 1.0f : -1.0f) * (float)n * page);
+        view_scroll_by(v, -(float)n * page);
         break;
+    case SDLK_F3: /* F3 / Shift+F3: next / previous match */
+        if (ctrl || alt) return;
+        search_next(shift);
+        return;
     case SDLK_G:
         if (ctrl || alt) return;
         if (shift) { /* G: end, or [count]G: that source line */
@@ -1090,6 +1136,9 @@ static void copy_code_block(int item)
     app.dirty = true;
 }
 
+static void set_zoom(float zoom);
+static void toggle_outline(void);
+
 /* App shortcuts use Ctrl+Shift so they never collide with AltGr letters
  * (AltGr = Ctrl+Alt on Windows) or with Neovim's own Ctrl mappings. */
 static bool app_shortcut(const SDL_KeyboardEvent *k)
@@ -1102,6 +1151,18 @@ static bool app_shortcut(const SDL_KeyboardEvent *k)
         switch (k->key) {
         case SDLK_O:
             show_open_dialog();
+            return true;
+        case SDLK_F: /* find, as everywhere else on Windows (also / and ?) */
+            search_begin(false);
+            return true;
+        case SDLK_EQUALS: case SDLK_PLUS: case SDLK_KP_PLUS:
+            set_zoom(app.zoom + 0.1f);
+            return true;
+        case SDLK_MINUS: case SDLK_KP_MINUS:
+            set_zoom(app.zoom - 0.1f);
+            return true;
+        case SDLK_0: case SDLK_KP_0:
+            set_zoom(1.0f);
             return true;
         case SDLK_A:
             view_select_all(&app.view);
@@ -1116,6 +1177,13 @@ static bool app_shortcut(const SDL_KeyboardEvent *k)
         }
     }
     switch (k->key) {
+    case SDLK_EQUALS: /* Ctrl++ on layouts where + is Shift+= */
+        if (app.focus != PANE_VIEWER) return false;
+        set_zoom(app.zoom + 0.1f);
+        return true;
+    case SDLK_T: /* outline panel on/off */
+        toggle_outline();
+        return true;
     case SDLK_C: /* copy the preview selection as plain text */
         if (app.focus != PANE_VIEWER) return false;
         copy_selection(false);
@@ -1251,10 +1319,133 @@ static bool is_markdown_path(const char *path)
     return false;
 }
 
+/* ------------------------------------------- back / forward, anchors -- */
+
+static const char *current_path(void);
+
+/* The same file, however it was spelled ("docs/a.md", "C:\\x\\docs\\a.md"). */
+static bool same_path(const char *a, const char *b)
+{
+    char *x = absolute_path(a), *y = absolute_path(b);
+#ifdef _WIN32
+    bool same = x && y && SDL_strcasecmp(x, y) == 0;
+#else
+    bool same = x && y && SDL_strcmp(x, y) == 0;
+#endif
+    SDL_free(x);
+    SDL_free(y);
+    return same;
+}
+
+static void history_push(HistoryEntry *stack, int *count, const char *path, float scroll)
+{
+    if (*count == HISTORY_MAX) { /* forget the oldest */
+        SDL_free(stack[0].path);
+        SDL_memmove(stack, stack + 1, sizeof(HistoryEntry) * (HISTORY_MAX - 1));
+        --*count;
+    }
+    stack[*count].path = SDL_strdup(path);
+    stack[*count].scroll = scroll;
+    ++*count;
+}
+
+static void history_clear(HistoryEntry *stack, int *count)
+{
+    for (int i = 0; i < *count; ++i) SDL_free(stack[i].path);
+    *count = 0;
+}
+
+/* The scroll position without zoom and display scale, so it means the same
+ * place after either changes. */
+static float unscaled_scroll(void)
+{
+    return app.view.scale > 0 ? app.view.scroll / app.view.scale : 0;
+}
+
+/* Before following a link: where to come back to. */
+static void remember_location(void)
+{
+    const char *p = current_path();
+    if (!p || !app.view.doc) return;
+    history_push(app.back, &app.back_count, p, unscaled_scroll());
+    history_clear(app.forward, &app.forward_count);
+}
+
+static void jump_to_block(int block)
+{
+    view_scroll_to_item(&app.view, block);
+    app.viewer_scrolled = true;
+    app.dirty = true;
+}
+
+/* "#heading" in the document on screen. */
+static void jump_to_anchor(const char *anchor)
+{
+    int block = outline_find(&app.outline, anchor);
+    if (block < 0) {
+        char *shown = SDL_strdup(anchor[0] == '#' ? anchor + 1 : anchor);
+        if (shown) percent_decode(shown);
+        char msg[160];
+        SDL_snprintf(msg, sizeof msg, "No heading for #%s", shown ? shown : "");
+        SDL_free(shown);
+        show_toast(msg);
+        return;
+    }
+    remember_location();
+    jump_to_block(block);
+}
+
+/* Following a link, dropping a file or picking one in the open dialog:
+ * the place left behind goes on the back list. */
+static void navigate_to_file(const char *path, const char *anchor)
+{
+    const char *cur = current_path();
+    if (cur && app.view.doc && same_path(cur, path)) {
+        if (anchor && anchor[0]) jump_to_anchor(anchor);
+        return;
+    }
+    remember_location();
+    SDL_free(app.pending_anchor);
+    app.pending_anchor = anchor && anchor[0] ? SDL_strdup(anchor) : NULL;
+    app.pending_scroll = -1;
+    open_file(path);
+}
+
+/* Alt+Left / Alt+Right, the mouse's back / forward buttons. */
+static void go_history(bool forward)
+{
+    HistoryEntry *from = forward ? app.forward : app.back;
+    int *from_count = forward ? &app.forward_count : &app.back_count;
+    HistoryEntry *to = forward ? app.back : app.forward;
+    int *to_count = forward ? &app.back_count : &app.forward_count;
+    if (*from_count == 0) {
+        show_toast(forward ? "Nothing to go forward to" : "Nothing to go back to");
+        return;
+    }
+    HistoryEntry e = from[--*from_count];
+    const char *cur = current_path();
+    if (cur && app.view.doc) history_push(to, to_count, cur, unscaled_scroll());
+    if (cur && app.view.doc && same_path(cur, e.path)) {
+        view_scroll_to(&app.view, e.scroll * app.view.scale);
+        app.viewer_scrolled = true;
+        app.dirty = true;
+    } else {
+        SDL_free(app.pending_anchor);
+        app.pending_anchor = NULL;
+        app.pending_scroll = e.scroll;
+        open_file(e.path);
+    }
+    SDL_free(e.path);
+}
+
 static void open_link(const char *url, size_t len)
 {
     char *u = SDL_strndup(url, len);
-    if (u[0] == '#') { SDL_free(u); return; } /* in-page anchors: not yet */
+    if (u[0] == '#') { /* a heading in this document */
+        if (u[1]) jump_to_anchor(u);
+        SDL_free(u);
+        return;
+    }
     char *local = u;
     if (SDL_strncasecmp(u, "file://", 7) == 0) {
         /* file:///C:/x.md and file:///home/x.md: local files like any other. */
@@ -1265,10 +1456,12 @@ static void open_link(const char *url, size_t len)
         SDL_free(u);
         return;
     }
+    char *hash = SDL_strchr(local, '#');
+    char *anchor = hash && hash[1] ? SDL_strdup(hash + 1) : NULL;
     char *query = SDL_strpbrk(local, "#?");
     if (query) *query = 0;
     percent_decode(local);
-    if (!local[0]) { SDL_free(u); return; }
+    if (!local[0]) { SDL_free(anchor); SDL_free(u); return; }
 
     const char *doc_path = app.view.doc ? app.view.doc->path : NULL;
     if ((!doc_path || !doc_path[0]) && app.start_file) doc_path = app.start_file;
@@ -1279,13 +1472,14 @@ static void open_link(const char *url, size_t len)
     if (absolute || !slash) path = SDL_strdup(local);
     else SDL_asprintf(&path, "%.*s/%s", (int)(slash - doc_path), doc_path, local);
     if (is_markdown_path(path)) {
-        open_file(path);
+        navigate_to_file(path, anchor);
     } else {
         char *file_url = NULL;
         SDL_asprintf(&file_url, "file:///%s", path[0] == '/' ? path + 1 : path);
         SDL_OpenURL(file_url);
         SDL_free(file_url);
     }
+    SDL_free(anchor);
     SDL_free(path);
     SDL_free(u);
 }
@@ -1383,6 +1577,35 @@ static void reload_file(void)
     char msg[160];
     SDL_snprintf(msg, sizeof msg, "Reloaded %s", base_name(p));
     show_toast(msg);
+}
+
+/* Auto-reload: the watched file changed. Neovim re-reads it unless its
+ * buffer has unsaved edits (the preview follows the buffer); without the
+ * editor the preview reads it again, keeping the scroll position. */
+static void file_changed_on_disk(const char *path)
+{
+    const char *p = current_path();
+    if (!p || SDL_strcmp(p, path) != 0) return; /* an older watch */
+    if (app.nvim_ok && app.nvim.attached) nvim_checktime(&app.nvim);
+    else start_load(p);
+}
+
+/* Preview zoom, 50% to 300% in steps of 10%. */
+static void set_zoom(float zoom)
+{
+    zoom = SDL_clamp(SDL_roundf(zoom * 10.0f) / 10.0f, 0.5f, 3.0f);
+    char msg[32];
+    SDL_snprintf(msg, sizeof msg, "Zoom %d%%", (int)SDL_lroundf(zoom * 100.0f));
+    show_toast(msg);
+    if (zoom == app.zoom) return;
+    app.zoom = zoom;
+    relayout();
+}
+
+static void toggle_outline(void)
+{
+    app.outline.visible = !app.outline.visible;
+    relayout();
 }
 
 static void SDLCALL save_dialog_done(void *userdata, const char *const *files, int filter)
@@ -1490,6 +1713,11 @@ static bool handle_event(const SDL_Event *e)
             if (e->key.key == SDLK_F7) { toggle_serif(); break; }
             if (e->key.key == SDLK_F12) { show_save_png_dialog(); break; }
         }
+        if ((e->key.mod & SDL_KMOD_LALT) && !(e->key.mod & (SDL_KMOD_CTRL | SDL_KMOD_SHIFT)) &&
+            (e->key.key == SDLK_LEFT || e->key.key == SDLK_RIGHT) && app.focus == PANE_VIEWER) {
+            go_history(e->key.key == SDLK_RIGHT);
+            break;
+        }
         if (app_shortcut(&e->key)) break;
         if ((e->key.mod & SDL_KMOD_CTRL) && !(e->key.mod & SDL_KMOD_RALT) &&
             (e->key.key == SDLK_Q) && app.focus == PANE_VIEWER) {
@@ -1515,7 +1743,20 @@ static bool handle_event(const SDL_Event *e)
     case SDL_EVENT_MOUSE_WHEEL: {
         float x = e->wheel.mouse_x, y = e->wheel.mouse_y;
         to_pixels(&x, &y);
-        if (editor_visible() && in_rect(&app.editor_rect, x, y)) {
+        if (in_rect(&app.outline_rect, x, y)) {
+            outline_scroll_by(&app.outline, &app.outline_rect, -e->wheel.y * 3 * 26.0f * display_scale(),
+                              display_scale());
+            app.dirty = true;
+        } else if ((SDL_GetModState() & SDL_KMOD_CTRL) && !(SDL_GetModState() & SDL_KMOD_RALT) &&
+                   viewer_visible() && in_rect(&app.viewer_rect, x, y)) {
+            /* Ctrl+wheel (and a touchpad pinch): zoom in steps of 10%. */
+            app.zoom_wheel += e->wheel.y;
+            int steps = (int)app.zoom_wheel;
+            if (steps != 0) {
+                app.zoom_wheel -= (float)steps;
+                set_zoom(app.zoom + 0.1f * (float)steps);
+            }
+        } else if (editor_visible() && in_rect(&app.editor_rect, x, y)) {
             const char *dir = e->wheel.y > 0 ? "up" : "down";
             int steps = (int)SDL_ceilf(SDL_fabsf(e->wheel.y));
             for (int i = 0; i < steps && i < 10; ++i) editor_mouse("wheel", dir, x, y);
@@ -1557,6 +1798,25 @@ static bool handle_event(const SDL_Event *e)
             if (down && e->button.button == SDL_BUTTON_LEFT) {
                 if (tool == CHROME_TOOL_COPY) copy_path();
                 else toggle_serif();
+            }
+            break;
+        }
+        if (e->button.button == SDL_BUTTON_X1 || e->button.button == SDL_BUTTON_X2) {
+            /* The mouse's back / forward buttons. */
+            if (down) go_history(e->button.button == SDL_BUTTON_X2);
+            break;
+        }
+        if (!app.selecting && !app.view.scrollbar_drag && in_rect(&app.outline_rect, x, y)) {
+            if (down && e->button.button == SDL_BUTTON_LEFT) {
+                int entry = outline_hit(&app.outline, &app.outline_rect, x, y, display_scale());
+                if (entry >= 0) {
+                    remember_location();
+                    jump_to_block(app.outline.entries[entry].block);
+                }
+                if (app.focus != PANE_VIEWER) {
+                    app.focus = PANE_VIEWER;
+                    relayout();
+                }
             }
             break;
         }
@@ -1630,6 +1890,13 @@ static bool handle_event(const SDL_Event *e)
             set_hand_cursor(true);
             break;
         }
+        const bool on_outline = !app.selecting && !app.view.scrollbar_drag && in_rect(&app.outline_rect, mx, my);
+        const int entry = on_outline ? outline_hit(&app.outline, &app.outline_rect, mx, my, display_scale()) : -1;
+        if (outline_set_hover(&app.outline, entry)) app.dirty = true;
+        if (on_outline) {
+            set_hand_cursor(entry >= 0);
+            break;
+        }
     }
         if (app.view.scrollbar_drag) {
             float x = e->motion.x, y = e->motion.y;
@@ -1672,7 +1939,7 @@ static bool handle_event(const SDL_Event *e)
         }
         break;
     case SDL_EVENT_DROP_FILE:
-        if (e->drop.data) open_file(e->drop.data);
+        if (e->drop.data) navigate_to_file(e->drop.data, NULL);
         break;
     case SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED:
     case SDL_EVENT_WINDOW_DISPLAY_SCALE_CHANGED:
@@ -1687,6 +1954,7 @@ static bool handle_event(const SDL_Event *e)
         break;
     case SDL_EVENT_WINDOW_MOUSE_LEAVE:
         if (view_hover(&app.view, -1, 0)) app.dirty = true;
+        if (outline_set_hover(&app.outline, -1)) app.dirty = true;
         if (chrome_set_tool_hover(CHROME_TOOL_NONE)) app.dirty = true;
         break;
     case SDL_EVENT_SYSTEM_THEME_CHANGED: {
@@ -1697,13 +1965,16 @@ static bool handle_event(const SDL_Event *e)
     default:
         if (e->type == app.wake_event) {
             if (e->user.code == 1 && e->user.data1) { /* file dialog result */
-                open_file(e->user.data1);
+                navigate_to_file(e->user.data1, NULL);
                 SDL_free(e->user.data1);
             } else if (e->user.code == 2 && e->user.data1) { /* save dialog: F12 */
                 save_png(e->user.data1);
                 SDL_free(e->user.data1);
             } else if (e->user.code == 3) { /* title bar button hovered / pressed */
                 app.dirty = true;
+            } else if (e->user.code == WATCH_EVENT_CODE && e->user.data1) {
+                file_changed_on_disk(e->user.data1);
+                SDL_free(e->user.data1);
             }
             if (app.toast[0] && SDL_GetTicks() >= app.toast_until) app.dirty = true;
             take_loaded_document();
@@ -1782,6 +2053,8 @@ int main(int argc, char **argv)
     app.layout = LAYOUT_VIEWER;
     app.vertical = true;
     app.focus = PANE_VIEWER;
+    app.zoom = 1.0f;
+    app.pending_scroll = -1;
 
     app.window = SDL_CreateWindow(APP_NAME, 1280, 820,
                                   SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY |
@@ -1896,6 +2169,8 @@ int main(int argc, char **argv)
 
     if (app.nvim_ok) editor_destroy(&app.editor);
     nvim_stop(&app.nvim);
+    watch_stop();
+    outline_free(&app.outline);
     view_destroy(&app.view);
     document_free(SDL_SetAtomicPointer(&app.loaded_doc, NULL));
     SDL_free(app.preview_pending_name);

@@ -5,6 +5,7 @@
 #include <SDL3_ttf/SDL_ttf.h>
 #include "editor.h"
 #include "nvim.h"
+#include "outline.h"
 #include "view.h"
 
 #define APP_NAME "md"
@@ -16,6 +17,15 @@ typedef enum Layout {
 } Layout;
 
 typedef enum Pane { PANE_EDITOR, PANE_VIEWER } Pane;
+
+/* A place in the back / forward history: a file and how far down it was
+ * scrolled. */
+typedef struct HistoryEntry {
+    char *path;
+    float scroll;        /* pixels at zoom 1 */
+} HistoryEntry;
+
+#define HISTORY_MAX 64
 
 typedef struct App {
     SDL_Window *window;
@@ -49,6 +59,18 @@ typedef struct App {
     bool editor_second;  /* editor on the right / bottom instead of left / top */
     Pane focus;
     SDL_FRect editor_rect, viewer_rect;
+    SDL_FRect outline_rect;  /* outline panel, left of the preview (Ctrl+Shift+T) */
+    Outline outline;
+    float zoom;              /* preview zoom, 1.0 = 100% (Ctrl+wheel, Ctrl+= / - / 0) */
+    float zoom_wheel;        /* fractional Ctrl+wheel steps (touchpad pinch) */
+
+    /* Back / forward (Alt+Left / Alt+Right, mouse side buttons). */
+    HistoryEntry back[HISTORY_MAX], forward[HISTORY_MAX];
+    int back_count, forward_count;
+    /* Applied to the next document that is not the one on screen: an
+     * anchor from "other.md#heading", or the scroll position to return to. */
+    char *pending_anchor;
+    float pending_scroll;    /* < 0: none */
     bool mouse_down_editor;
 
     /* Scroll sync. The editor reports its top line (md_scroll); scrolling

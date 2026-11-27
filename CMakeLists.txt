@@ -55,6 +55,10 @@ add_executable(md WIN32
     src/document.h
     src/view.c
     src/view.h
+    src/outline.c
+    src/outline.h
+    src/watch.c
+    src/watch.h
     src/theme.h
     src/nvim.c
     src/nvim.h
