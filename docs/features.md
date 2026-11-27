@@ -26,7 +26,7 @@ follows as you type.
 | :--- | :--- |
 | `F1` | Show / hide a list of all shortcuts |
 | `F2` | Copy the full path of the open file |
-| `F5` | Reload the file from disk (through Neovim when it runs; unsaved edits are kept) |
+| `F5` | Reload the file from disk (through Neovim when it runs; unsaved edits are kept). md also reloads by itself when the file changes on disk |
 | `F7` | Switch the text between Roboto Serif (the default) and Roboto (also `--sans`, or the **Aa** button in the title bar, left of minimize) |
 | `F8` | Switch between the light and dark theme (also `--light` / `--dark`) |
 | `F12` | Save the whole rendered document as a PNG image |
@@ -34,19 +34,22 @@ follows as you type.
 | `Ctrl+Shift+S` | Split on/off (off shows only the preview, the default) |
 | `Ctrl+Shift+X` | Swap which side the editor is on |
 | `Ctrl+Shift+E` | Editor only on/off |
+| `Ctrl+Shift+T` | Outline on/off: every heading in a panel left of the preview; click one to jump, the section on screen is marked |
 | `Ctrl+Shift+Tab` | Move keyboard focus between editor and preview |
 | `Ctrl+Shift+N` | Open a file |
 | `Ctrl+O` | Open a file (when the preview has focus) |
 | `Ctrl+Q` | Quit (when the preview has focus) |
+| `Alt+Left` / `Alt+Right`, mouse side buttons | Back / forward after following a link, jumping to a heading or opening a file |
 | `Ctrl+A` | Select all text in the preview |
 | `Ctrl+C` | Copy the selection as rich text: pasting into Word, Outlook or a browser keeps headings, lists, links, tables and code colours |
 | `Ctrl+Shift+C` | Copy the selection as plain text |
 | Copy button on a code block | Hover a code block and click the button in its top-right corner to copy its code as plain text (no fences, no language name); a check mark and a toast confirm it |
 | Mouse drag | Select text in the preview; Shift+click extends it |
 | `PgUp` / `PgDn` / `Space` / `Home` / `End` | Scroll the preview (when it has focus); the editor follows |
-| `j` / `k`, `Ctrl+d` / `Ctrl+u`, `Ctrl+f` / `Ctrl+b`, `gg` / `G` | Vim-style scrolling in the preview; counts work (`5j`, `42G` jumps to source line 42) |
+| `Ctrl+wheel`, `Ctrl+=` / `Ctrl+-` / `Ctrl+0` | Zoom the preview in / out / back to 100% (50% to 300%) |
+| `j` / `k`, `Ctrl+d` / `Ctrl+u`, `Ctrl+b`, `gg` / `G` | Vim-style scrolling in the preview; counts work (`5j`, `42G` jumps to source line 42) |
 | `Shift`+wheel, horizontal wheel / touchpad | Scroll the code block under the mouse sideways when its lines are wider than the box (a thin bar at its bottom shows where you are) |
-| `/` or `?`, then `n` / `N` | Search the preview forward / backward (Enter keeps the match, Esc cancels), then jump between matches |
+| `Ctrl+F`, `/` or `?`, then `n` / `N` or `F3` / `Shift+F3` | Search the preview forward / backward (Enter keeps the match, Esc cancels), then jump between matches |
 
 Everything else typed in the editor goes to Neovim. Closing the window asks
 Neovim to quit, so unsaved changes are never lost silently.
@@ -140,7 +143,12 @@ Polish text: Zażółć gęślą jaźń. ZAŻÓŁĆ GĘŚLĄ JAŹŃ.
 [ts]: https://tree-sitter.github.io/tree-sitter/
 [roboto]: https://fonts.google.com/specimen/Roboto
 
-Click a link in the preview to open it. Links to `.md` files open in md.
+- In-page anchor: [jump to the tables](#tables), or [back to the top](#md-feature-tour-)
+- Anchor in another file: [README's usage section](../README.md#-usage)
+
+Click a link in the preview to open it. Links to `.md` files open in md, and
+`#anchors` jump to the heading with that GitHub-style anchor (lower case,
+punctuation dropped, spaces as hyphens). `Alt+Left` comes back.
 
 ## Emoji
 
