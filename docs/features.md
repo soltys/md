@@ -258,7 +258,11 @@ Remote `http://` and `https://` images are downloaded in the background
 image arrives, and stays if the download fails or the server does not answer
 with an image:
 
-![md folder sprite](https://raw.githubusercontent.com/soltys/md/main/art/png/folder@3x.png)
+Remote image:
+
+![md folder sprite](https://picsum.photos/200/300)
+
+Image which does not exists:
 
 ![remote image that does not exist](https://example.com/image.png)
 
